@@ -3,11 +3,12 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-import json, os, shutil, subprocess, uuid
+import json, os, uuid
 from .build import BuildError
 from .config import DriverConfig
-from .package_state import load_package_snapshot, restore_package_state, write_package_snapshot
+from .package_state import capture_package_state, load_package_snapshot, restore_package_state
 from .rollback import apply_snapshot, create_snapshot
+from .rollback_preflight import check_rollback_availability
 from .system import loaded_modules, nvidia_smi_driver_version, running_kernel
 
 @dataclass(frozen=True)
@@ -39,8 +40,13 @@ def begin_transaction(config:DriverConfig, *, rollback_root:Path|None=None, root
     storage=root or transaction_root(); storage.mkdir(parents=True,exist_ok=True)
     tid=datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")+"-"+uuid.uuid4().hex[:8]
     directory=storage/tid; directory.mkdir(parents=True,exist_ok=False)
+    package_path=directory/"package-state.json"; snap=capture_package_state()
+    package_path.write_text(json.dumps(snap.to_dict(),indent=2,sort_keys=True)+"\n",encoding="utf-8")
+    preflight=check_rollback_availability(snap)
+    (directory/"rollback-preflight.json").write_text(json.dumps(preflight.to_dict(),indent=2,sort_keys=True)+"\n",encoding="utf-8")
+    if not preflight.available:
+        raise BuildError("rollback preflight failed; unavailable versions: "+", ".join(preflight.missing))
     module_snapshot=create_snapshot(root=rollback_root)
-    package_path=directory/"package-state.json"; write_package_snapshot(package_path)
     tx=Transaction(tid,datetime.now(timezone.utc).isoformat(),running_kernel(),nvidia_smi_driver_version() or "unknown",config.version,module_snapshot.root,str(package_path),_boot_id(),"prepared")
     _write(tx,storage); return tx
 
@@ -84,11 +90,6 @@ def validate_pending(*, auto_rollback:bool=False, root:Path|None=None)->tuple[Tr
         rollback_failed=Transaction(**{**failed.to_dict(),"state":"rollback-failed","failure_reason":f"{reason}; rollback error: {exc}"}); _write(rollback_failed,storage); return rollback_failed,False,rollback_failed.failure_reason or reason
     rolled=Transaction(**{**failed.to_dict(),"state":"rolled-back"}); _write(rolled,storage); pending_path(storage).unlink(missing_ok=True); return rolled,False,reason
 
-def install_boot_guard(*, confirmed:bool)->Path:
-    if not confirmed: raise BuildError("boot guard installation requires --yes")
-    if os.geteuid()!=0: raise BuildError("boot guard installation must run as root")
-    systemctl=shutil.which("systemctl")
-    if not systemctl: raise BuildError("systemd/systemctl is required for automatic boot validation")
-    unit=Path("/etc/systemd/system/nvlx-boot-guard.service")
-    unit.write_text("""[Unit]\nDescription=Validate pending NVIDIA driver transaction\nAfter=multi-user.target\nConditionPathExists=/var/lib/nvlx/transactions/pending.json\n\n[Service]\nType=oneshot\nExecStart=/usr/bin/env nvlx boot-validate --auto-rollback\n\n[Install]\nWantedBy=multi-user.target\n""",encoding="utf-8")
-    subprocess.run([systemctl,"daemon-reload"],check=True); subprocess.run([systemctl,"enable","nvlx-boot-guard.service"],check=True); return unit
+def install_boot_guard(*, confirmed:bool, retries:int=3, restart_sec:int=20, timeout_sec:int=90)->Path:
+    from .watchdog import WatchdogPolicy, install_watchdog
+    return install_watchdog(WatchdogPolicy(retries,restart_sec,timeout_sec),confirmed=confirmed)

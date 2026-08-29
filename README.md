@@ -1,130 +1,115 @@
-# Linux NVIDIA Drivers v0.4
+# Linux NVIDIA Drivers v0.5
 
-`nvlx` is a Linux-first NVIDIA driver control plane for official GPU support classification, transactional driver upgrades, distro-aware deployment, open-kernel-module builds, Secure Boot, rollback, hybrid graphics, multi-GPU topology, MIG/Fabric Manager compatibility, CUDA/container checks, and health telemetry.
+`nvlx` is a Linux-first NVIDIA driver control plane for transactional upgrades, rollback safety, GPU health, MIG/NVLink/NVSwitch operations, Kubernetes GPU Operator planning, immutable hosts, and reproducible signed releases.
 
 > [!IMPORTANT]
 > This project does not redistribute NVIDIA proprietary user-space components. It orchestrates and validates NVIDIA's official Linux driver/open-kernel-module ecosystem.
 
-## v0.4 highlights
+## v0.5 highlights
 
-- **Transactional driver upgrades.** `nvlx install` captures NVIDIA/CUDA package versions and a per-kernel NVIDIA module snapshot before installation, then arms a post-reboot transaction.
-- **Boot health validation.** `nvlx boot-validate` checks the target driver version, `nvidia-smi`, and the loaded kernel module after a reboot boundary.
-- **Automatic rollback guard.** `nvlx boot-guard-install --yes` installs a systemd oneshot that validates a pending transaction after boot and attempts package/module rollback when validation fails.
-- **Package-state snapshots.** APT, RPM/DNF, pacman, and NixOS package/declarative state are inventoried. Exact automatic rollback is supported where the native package manager can request the captured version; Arch rollback reports when cached package archives are required.
-- **Wayland / GBM diagnostics.** Reports session type, compositor hints, `nvidia_drm` modeset/fbdev state, DRM nodes, GBM, NVIDIA EGL-Wayland libraries, Xwayland, and actionable warnings.
-- **Multi-GPU topology.** Parses `nvidia-smi topo -m`, GPU inventory, NVLink adjacency evidence, and NVSwitch evidence.
-- **MIG / Fabric Manager / DCGM.** Reports MIG mode and instances, Fabric Manager service/version alignment, and R610 DCGM compatibility. For the pinned 610.57.04 baseline, Fabric Manager should match the driver release and DCGM should be 4.3.x or newer.
-- **Prometheus + JSON health telemetry.** `nvlx telemetry` exposes overall health, GPU count, driver/module status, topology, NVLink/NVSwitch evidence, MIG instance count, Fabric Manager, and DCGM compatibility.
-- **Expanded sanitized support bundles.** `nvlx report` now includes runtime health, Wayland/GBM, topology, MIG/Fabric Manager, signing, compatibility, and pending transaction state.
+- **Rollback-version availability preflight.** Before a transaction starts, nvlx verifies the captured NVIDIA/CUDA/Fabric/DCGM package versions are still recoverable through APT/DNF repositories, the pacman cache, or the current NixOS generation. Missing rollback artifacts abort the upgrade.
+- **Systemd retry policy.** The boot guard now supports bounded restart attempts, restart delay, validation timeout, and start-limit windows instead of a single one-shot recovery attempt.
+- **Per-GPU ECC + Xid telemetry.** `nvlx dcgm-telemetry` queries volatile corrected/uncorrected ECC counters per GPU, associates current-boot Xid events with PCI bus IDs, and detects DCGM Exporter Xid/ECC Prometheus series.
+- **NVSDM / Blackwell NVSwitch readiness.** `nvlx nvsdm` verifies the driver-major-aligned `libnvsdm-<branch>` package and DCGM NVSwitch discovery. The experimental `nvsdm_cli` is reported but not relied on as a stable interface.
+- **MIG profile lifecycle.** `mig-profile-plan` previews disruptive commands. `mig-profile-apply` requires root, `--maintenance`, `--yes`, confirmed MIG capability, and zero active compute processes.
+- **GPU Operator integration.** `gpu-operator-plan` generates a pinned NVIDIA GPU Operator 26.7 Helm plan using the configured driver release and `none`, `single`, or `mixed` MIG strategy.
+- **Immutable-host support.** `immutable-plan` prevents conventional mutation assumptions on RHCOS/CoreOS/Flatcar/Bottlerocket/Talos/COS-class hosts. RHCOS is identified as the NVIDIA-validated OpenShift path; other immutable systems remain advisory unless NVIDIA/platform validation exists.
+- **Signed reproducible releases.** Tagged releases build a deterministic source archive twice, require matching SHA-256 manifests, create a GitHub provenance attestation using OIDC, and publish the attested artifacts.
+- **Telemetry/report schema expansion.** JSON/Prometheus telemetry and sanitized support bundles now include ECC/Xid, DCGM Exporter, NVSDM, immutable-host, and rollback-preflight state.
 
-## Current NVIDIA baseline
+## Current NVIDIA ecosystem baseline
 
-The configured baseline is **610.57.04**. NVIDIA's R610 release notes pair driver 610.57.04 with Fabric Manager 610.57.04 and require DCGM 4.3.x or newer. The version remains centralized in `config/driver-series.toml`.
+The driver baseline remains **610.57.04** in `config/driver-series.toml`. The current GPU Operator 26.7 component matrix supports driver 610.57.04 and includes DCGM Exporter 4.6.0-4.8.3, DCGM 4.6.0-1, and MIG Manager 0.15.0. NVSDM packages are aligned by driver major, e.g. `libnvsdm-610` for R610.
 
 ## Main commands
 
 ```bash
-# host / support
-nvlx detect
-nvlx doctor
-nvlx plan
-nvlx gpu-db-sync
-nvlx gpu-support
-
-# distro / repositories / DKMS
-nvlx distro-plan
-nvlx repo-plan
-nvlx dkms-status
-
-# graphics/session topology
-nvlx prime
-nvlx session
-nvlx topology
-nvlx mig-fabric
-
-# health / telemetry
-nvlx health
-nvlx telemetry --format json
-nvlx telemetry --format prometheus
-
-# transactional source build/install
-nvlx fetch
-nvlx build --source ./vendor/open-gpu-kernel-modules
+# rollback / transaction safety
+nvlx package-state
+nvlx rollback-preflight
 sudo nvlx install --source ./vendor/open-gpu-kernel-modules --yes
 nvlx transaction-pending
+nvlx watchdog-plan --retries 3 --restart-sec 20 --timeout-sec 90
 sudo nvlx boot-guard-install --yes
 sudo nvlx boot-validate --auto-rollback
 
-# package and initramfs state
-nvlx package-state
-nvlx initramfs-plan
-sudo nvlx initramfs-regenerate --yes
+# fleet reliability / switching
+nvlx health
+nvlx dcgm-telemetry
+nvlx nvsdm
+nvlx topology
+nvlx mig-fabric
+nvlx telemetry --format prometheus
 
-# Secure Boot
-nvlx secureboot-plan
-sudo nvlx secureboot-keygen --key-dir /root/nvlx-mok --yes
-sudo nvlx secureboot-sign --source ./vendor/open-gpu-kernel-modules --key /root/nvlx-mok/MOK.key --cert /root/nvlx-mok/MOK.der --yes
-nvlx secureboot-verify
+# MIG lifecycle
+nvlx mig-profile-plan 1g.10gb
+sudo nvlx mig-profile-apply 1g.10gb --maintenance --yes
+nvlx mig-profile-plan disabled
 
-# explicit module rollback
-sudo nvlx rollback-snapshot
-nvlx rollback-list
-sudo nvlx rollback-apply /var/lib/nvlx/rollback/<snapshot-id> --yes
+# Kubernetes / immutable hosts
+nvlx gpu-operator-plan --mig-strategy mixed
+nvlx immutable-plan
 
-# CUDA / Container Toolkit
+# graphics / compatibility
+nvlx prime
+nvlx session
 nvlx compat
+nvlx secureboot-verify
 
 # sanitized support bundle
 nvlx report ./nvlx-report
 ```
 
-## Transaction lifecycle
+## Transaction safety model
 
 ```text
-PREPARE
-  capture package state
-  snapshot installed NVIDIA kernel modules
-        |
-        v
-INSTALL
-  modules_install + depmod
-        |
-        v
-ARM
-  write /var/lib/nvlx/transactions/pending.json
-        |
-        v
-REBOOT
-        |
-        v
-VALIDATE
-  nvidia module loaded?
-  nvidia-smi enumerates GPUs?
-  driver == target release?
-        |
-        +---- healthy ---> mark validated
-        |
-        +---- failure ---> package restore + module restore + initramfs rebuild
+PACKAGE SNAPSHOT
+      |
+      v
+ROLLBACK AVAILABILITY PREFLIGHT ---- unavailable ---> ABORT
+      |
+      v
+MODULE SNAPSHOT
+      |
+      v
+INSTALL + DEPMOD
+      |
+      v
+PENDING REBOOT
+      |
+      v
+BOOT GUARD (bounded retry policy)
+      |
+      +---- healthy ---> VALIDATED
+      |
+      +---- failed ----> restore exact packages + modules + initramfs
 ```
 
-The boot guard is opt-in because enabling a systemd recovery action is a persistent host mutation. Once installed, it only runs when a pending transaction marker exists.
+A package manifest alone is not treated as rollback capability. v0.5 requires evidence that the recorded versions can actually be restored before module replacement begins.
 
-## Wayland / GBM model
+## MIG safety
 
-NVIDIA's Wayland/GBM path requires DRM KMS plus the relevant GBM/EGL libraries. `nvlx session` therefore checks the active session and the NVIDIA DRM modeset parameter rather than treating the presence of `WAYLAND_DISPLAY` as proof of a correct GPU stack.
+MIG geometry changes can terminate or invalidate GPU workloads. nvlx therefore refuses profile application while compute processes are active and requires both `--maintenance` and `--yes`. The Kubernetes path remains declarative: GPU Operator MIG Manager watches `nvidia.com/mig.config` and handles node/pod coordination independently of the local CLI path.
+
+## Immutable hosts
+
+Direct source installation is intended for conventional mutable Linux hosts. On immutable/container-optimized systems, nvlx reports a deployment strategy instead of pretending host package mutation is safe. RHCOS should use the OpenShift GPU Operator path; other immutable platforms require their own validated driver/operator mechanism.
+
+## Reproducible release model
+
+`scripts/repro_release.py` normalizes archive ownership and timestamps and produces `SHA256SUMS`. `.github/workflows/release.yml` rebuilds the archive twice and uses GitHub artifact attestations before publishing a tag release. Driver baseline updates remain separate reviewable PRs and are never auto-merged.
 
 ## Safety invariants
 
-1. NVIDIA support claims come from a pinned official upstream support table.
-2. Kernel module, user-space driver, GSP firmware, and Fabric Manager versions remain release-aligned where applicable.
-3. Direct install requires root and explicit `--yes`.
-4. Direct install cannot begin without recoverable module and package state capture.
-5. A transaction is not considered healthy until it crosses a reboot boundary and passes post-boot validation.
-6. Secure Boot is never disabled automatically and MOK enrollment remains explicit.
-7. Active graphics modules are never hot-unloaded automatically.
-8. Automatic package rollback is attempted only through supported native mechanisms; unsupported exact rollback paths fail visibly rather than guessing.
-9. Automated NVIDIA release discovery opens PRs for review; it does not auto-merge driver updates.
-10. Diagnostic bundles are sanitized but must still be reviewed before external sharing.
+1. Rollback versions must be available before a transaction begins.
+2. Kernel module, user-space driver, GSP firmware, Fabric Manager, NVSDM, and related branch components remain release-aligned where applicable.
+3. Recovery retries are bounded; persistent failures remain visible instead of looping forever.
+4. MIG changes require a drained maintenance window.
+5. Immutable hosts are not silently converted into mutable hosts.
+6. GPU Operator integration is advisory and pinned; nvlx does not silently mutate a Kubernetes cluster.
+7. NVSDM CLI output is not treated as a stable API contract while NVIDIA labels that tool experimental.
+8. Tagged release artifacts must be byte-reproducible across two builds before attestation/publication.
+9. Diagnostic bundles are sanitized but must still be reviewed before external sharing.
 
 ## Development
 

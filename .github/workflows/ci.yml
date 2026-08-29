@@ -27,6 +27,11 @@ jobs:
         run: python -m compileall -q src tests scripts
       - name: Unit tests
         run: python -m unittest discover -s tests -v
+      - name: Reproducible archive smoke test
+        run: |
+          python scripts/repro_release.py 0.5.0 --out /tmp/repro-a
+          python scripts/repro_release.py 0.5.0 --out /tmp/repro-b
+          cmp /tmp/repro-a/SHA256SUMS /tmp/repro-b/SHA256SUMS
       - name: CLI smoke test
         run: |
           nvlx --version
@@ -37,8 +42,15 @@ jobs:
           nvlx secureboot-verify
           nvlx session
           nvlx mig-fabric
+          nvlx mig-profile-plan disabled
           nvlx health
           nvlx telemetry --format json
           nvlx telemetry --format prometheus
+          nvlx rollback-preflight
+          nvlx watchdog-plan
+          nvlx gpu-operator-plan
+          nvlx immutable-plan
+          nvlx nvsdm
+          nvlx dcgm-telemetry || test $? -eq 1
           nvlx topology || test $? -eq 1
           nvlx transaction-pending || test $? -eq 1

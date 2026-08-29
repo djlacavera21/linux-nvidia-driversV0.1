@@ -4,10 +4,14 @@ from datetime import datetime, timezone
 import json, re
 from pathlib import Path
 from .compat import compatibility_report
+from .dcgm_telemetry import exporter_state, reliability_rows
 from .distro import build_distro_plan
 from .health import health_report
+from .immutable import immutable_plan
 from .mig import mig_fabric_report
+from .nvsdm import nvsdm_report
 from .prime import prime_report
+from .rollback_preflight import check_rollback_availability
 from .secureboot import secure_boot_plan, verify_installed_modules
 from .session import session_report
 from .system import host_snapshot
@@ -29,17 +33,22 @@ def _sanitize(value):
     return value
 
 def build_report()->dict[str,object]:
-    pending=load_pending()
+    pending=load_pending(); exporter=exporter_state()
     payload={
-        "schema":2,
+        "schema":3,
         "generated_at":datetime.now(timezone.utc).isoformat(),
         "host":host_snapshot(),
         "health":health_report(require_expected_version=False).to_dict(),
         "distro":build_distro_plan().to_dict(),
+        "immutable":immutable_plan().to_dict(),
         "prime":prime_report().to_dict(),
         "session":session_report().to_dict(),
         "topology":topology_report().to_dict(),
         "mig_fabric":mig_fabric_report().to_dict(),
+        "gpu_reliability":[v.to_dict() for v in reliability_rows()],
+        "dcgm_exporter":exporter.to_dict(),
+        "nvsdm":nvsdm_report().to_dict(),
+        "rollback_preflight":check_rollback_availability().to_dict(),
         "secure_boot":secure_boot_plan().to_dict(),
         "module_signatures":[v.to_dict() for v in verify_installed_modules()],
         "compatibility":compatibility_report().to_dict(),
