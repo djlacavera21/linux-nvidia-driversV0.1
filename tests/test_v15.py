@@ -1,3 +1,4 @@
+import json
 import tempfile
 import unittest
 from pathlib import Path
@@ -15,6 +16,7 @@ from nvlx.shutdown_v154 import evaluate as shutdown
 from nvlx.leadership_v155 import FenceToken, validate as fence
 from nvlx.fence_store_v156 import save as save_fence, load as load_fence
 from nvlx.lease_renewal_v156 import classify as renewal
+from nvlx.fence_recovery_v157 import assess as recover_fence
 
 class V15Tests(unittest.TestCase):
     def test_watch_relist(self): self.assertEqual(decide("ERROR","10").action,"relist")
@@ -47,6 +49,15 @@ class V15Tests(unittest.TestCase):
     def test_fence_token_persists_across_restart(self):
         with tempfile.TemporaryDirectory() as d:
             p=Path(d)/"fence.json"; t=FenceToken("controller-a",7,"42"); save_fence(p,t); self.assertEqual(load_fence(p),t)
+    def test_fence_store_detects_tampering(self):
+        with tempfile.TemporaryDirectory() as d:
+            p=Path(d)/"fence.json"; save_fence(p,FenceToken("controller-a",7,"42")); data=json.loads(p.read_text())
+            data["token"]["epoch"]=8; p.write_text(json.dumps(data),encoding="utf-8")
+            with self.assertRaises(ValueError): load_fence(p)
+    def test_legacy_fence_store_remains_readable(self):
+        with tempfile.TemporaryDirectory() as d:
+            p=Path(d)/"fence.json"; p.write_text('{"epoch":7,"holder":"controller-a","lease_resource_version":"42"}',encoding="utf-8")
+            self.assertEqual(load_fence(p),FenceToken("controller-a",7,"42"))
     def test_persisted_old_token_fails_after_handoff(self):
         with tempfile.TemporaryDirectory() as d:
             p=Path(d)/"fence.json"; save_fence(p,FenceToken("controller-a",7,"42")); restored=load_fence(p)
@@ -55,6 +66,17 @@ class V15Tests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as d:
             p=Path(d)/"fence.json"; p.write_text('{"holder":"a"}',encoding="utf-8")
             with self.assertRaises(ValueError): load_fence(p)
+    def test_recovery_restores_exact_live_lease(self):
+        r=recover_fence(FenceToken("controller-a",7,"42"),current_holder="controller-a",current_epoch=7,current_resource_version="42")
+        self.assertTrue(r.allowed); self.assertEqual(r.action,"restore")
+    def test_recovery_reacquires_newer_epoch(self):
+        r=recover_fence(FenceToken("controller-a",7,"42"),current_holder="controller-b",current_epoch=8,current_resource_version="43")
+        self.assertFalse(r.allowed); self.assertEqual(r.action,"reacquire")
+    def test_recovery_detects_epoch_rollback(self):
+        r=recover_fence(FenceToken("controller-a",8,"43"),current_holder="controller-a",current_epoch=7,current_resource_version="42")
+        self.assertFalse(r.allowed); self.assertEqual(r.action,"rollback-detected")
+    def test_recovery_without_token_requires_reacquire(self):
+        self.assertEqual(recover_fence(None,current_holder="controller-a",current_epoch=7,current_resource_version="42").action,"reacquire")
     def test_renewal_conflict_fences_and_retries(self): self.assertEqual(renewal(409,holder_unchanged=True,resource_version_unchanged=False).action,"relist-fence")
     def test_renewal_uncertainty_fences(self):
         r=renewal(503,holder_unchanged=True,resource_version_unchanged=True); self.assertFalse(r.leadership_valid); self.assertTrue(r.retry)
