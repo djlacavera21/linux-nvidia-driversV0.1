@@ -1,25 +1,24 @@
-# nvlx: Linux-NVIDIA-Driver v1.5.2
+# nvlx: Linux-NVIDIA-Driver v1.5.3
 
-`nvlx` v1.5.2 is a second stabilization patch for the live Kubernetes operator. It closes race-condition gaps around conflict responses, delete events, retry exhaustion, finalizer inputs, and leader-lease readiness without expanding the API surface.
+`nvlx` v1.5.3 is a third stabilization patch for the live Kubernetes operator. It closes stale-generation and duplicate-status-write races while tightening finalizer sequencing and Kubernetes patch response handling, without expanding the CRD or control-plane API surface.
 
 > [!IMPORTANT]
-> The operator remains approval-bound and fail-closed. It still owns only its status fields and protective finalizer; desired driver/GPU Operator state remains controlled by the existing approval, maintenance, preflight, rollout, circuit, health/SLO, PSIRT, rollback and audit gates.
+> The operator remains approval-bound and fail-closed. Desired driver and GPU Operator changes still pass through the existing approval, maintenance, preflight, rollout, circuit, health/SLO, PSIRT, rollback and audit gates.
 
-## v1.5.2 fixes
+## v1.5.3 fixes
 
-- **Conflict classification.** Kubernetes `409 Conflict` now maps to relist-and-retry, `404` maps to a terminal gone state, `429`/5xx remain retryable, and other 4xx outcomes hold for operator review.
-- **Delete-event safety.** A `DELETED` watch event is observed but never produces a status patch against a disappearing object.
-- **Retry exhaustion propagation.** Reconcile/relist paths surface a first-class `dead-letter` action once the bounded retry budget is exhausted.
-- **Finalizer validation.** Impossible negative quarantine counts are rejected rather than influencing deletion safety decisions.
-- **Leader-lease readiness.** A leader with a stale lease is explicitly not ready to mutate fleet state.
-- **Regression coverage.** Tests cover patch conflicts, gone objects, delete-event races, exhausted retries, invalid finalizer inputs, and stale leader leases.
-- **1.5.1 retained.** Watch-cursor validation, retry-bound checks, strict field-ownership parsing, optimistic patching, bounded workqueues, `GPUFleet` CRD, status conditions, finalizers, Events API and admission policy remain active.
+- **Stale generation guard.** Reconcile events older than the latest observed `metadata.generation` are discarded before runtime planning or status mutation.
+- **Status write idempotency.** Stable status fingerprints ignore volatile transition/event timestamps, suppressing repeated status writes when the logical status is unchanged.
+- **Finalizer sequencing.** Deletion processing treats an already-absent protective finalizer as complete instead of attempting another metadata mutation.
+- **Patch classification consistency.** `410 Gone` is terminal, `412 Precondition Failed` relists and retries, and `408`/`425`/`429` plus 5xx responses remain retryable.
+- **Regression coverage.** Tests cover stale event generations, duplicate status suppression, already-removed finalizers, precondition conflicts, gone resources, and timeout retries.
+- **1.5.2 retained.** Delete-event safety, bounded dead-letter behavior, leader-lease readiness, strict field ownership, watch cursor validation, optimistic concurrency and all previous controller safeguards remain active.
 
 ## Safety invariants
 
-1. Status writes never proceed blindly after a Kubernetes conflict.
-2. Deleted resources are not patched after their terminal watch event.
-3. Retry exhaustion stops automatic progression and becomes an explicit dead-letter outcome.
-4. Finalizer safety inputs are validated before deletion decisions are made.
-5. A stale leader lease removes mutation readiness.
-6. All v0.1-v1.5.1 approval, rollback, Secure Boot, DRA, fabric, health/SLO, PSIRT, quarantine, audit, SBOM and provenance safeguards remain in force.
+1. An older generation cannot overwrite status derived from a newer desired state.
+2. Logically identical status does not produce repeated Kubernetes writes solely because timestamps changed.
+3. Finalizer removal is idempotent when deletion races another controller/API update.
+4. Patch precondition conflicts force relist/retry instead of blind overwrite.
+5. Gone resources terminate mutation attempts.
+6. All v0.1-v1.5.2 approval, rollback, Secure Boot, DRA, fabric, health/SLO, PSIRT, quarantine, audit, SBOM and provenance safeguards remain in force.
