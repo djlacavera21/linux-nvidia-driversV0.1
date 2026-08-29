@@ -7,6 +7,7 @@ import re, shutil, subprocess, urllib.request
 class GpuReliability:
     index:str
     uuid:str
+    pci_bus_id:str
     corrected_volatile:int|None
     uncorrected_volatile:int|None
     xid_last:int|None
@@ -27,17 +28,10 @@ def _int(value:str)->int|None:
     try: return int(float(value))
     except ValueError: return None
 
-def reliability_rows()->tuple[GpuReliability,...]:
-    smi=shutil.which("nvidia-smi")
-    if not smi: return ()
-    fields="index,uuid,ecc.errors.corrected.volatile.total,ecc.errors.uncorrected.volatile.total"
-    try: r=subprocess.run([smi,f"--query-gpu={fields}","--format=csv,noheader,nounits"],capture_output=True,text=True,timeout=8,check=False)
-    except OSError: return ()
-    xids=_kernel_xids(); rows=[]
-    for line in r.stdout.splitlines():
-        parts=[p.strip() for p in line.split(",")]
-        if len(parts)>=4: rows.append(GpuReliability(parts[0],parts[1],_int(parts[2]),_int(parts[3]),xids.get(parts[0])))
-    return tuple(rows)
+def _bus(value:str)->str:
+    value=value.strip().lower()
+    if re.match(r"^[0-9a-f]{8}:",value): value=value[4:]
+    return value
 
 def _kernel_xids()->dict[str,int]:
     journal=shutil.which("journalctl")
@@ -45,11 +39,23 @@ def _kernel_xids()->dict[str,int]:
     try: text=subprocess.run([journal,"-k","-b","--no-pager"],capture_output=True,text=True,timeout=8,check=False).stdout
     except OSError: return {}
     out:dict[str,int]={}
-    # Typical kernel lines include PCI:0000:BB:DD.F and Xid (PCI:...): NN.
     for line in text.splitlines():
-        m=re.search(r"Xid \(PCI:[^)]+\):\s*(\d+)",line)
-        if m: out["last"]=int(m.group(1))
+        m=re.search(r"Xid \(PCI:([0-9A-Fa-f:.]+)\):\s*(\d+)",line)
+        if m: out[_bus(m.group(1))]=int(m.group(2))
     return out
+
+def reliability_rows()->tuple[GpuReliability,...]:
+    smi=shutil.which("nvidia-smi")
+    if not smi: return ()
+    fields="index,uuid,pci.bus_id,ecc.errors.corrected.volatile.total,ecc.errors.uncorrected.volatile.total"
+    try: r=subprocess.run([smi,f"--query-gpu={fields}","--format=csv,noheader,nounits"],capture_output=True,text=True,timeout=8,check=False)
+    except OSError: return ()
+    xids=_kernel_xids(); rows=[]
+    for line in r.stdout.splitlines():
+        parts=[p.strip() for p in line.split(",")]
+        if len(parts)>=5:
+            bus=_bus(parts[2]); rows.append(GpuReliability(parts[0],parts[1],bus,_int(parts[3]),_int(parts[4]),xids.get(bus)))
+    return tuple(rows)
 
 def exporter_state(url:str="http://127.0.0.1:9400/metrics")->DcgmExporterState:
     text=""; reachable=False
