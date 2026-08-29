@@ -1,86 +1,111 @@
-# Linux NVIDIA Drivers v0.9
+# Linux NVIDIA Drivers v1.0
 
-`nvlx` now extends the v0.8 placement/resilience layer into a **governed GPU fleet execution plane**. v0.9 adds policy-as-code, deterministic placement scoring, fleet SLO gates, GPU Direct Storage checkpoint readiness, Run:ai/DRA inspection, power-curtailment planning, append-only decision auditing, and guarded cross-cluster failover plans.
+`nvlx` v1.0 promotes the project from a GPU fleet toolkit into a **production control plane**. The host `nvlx` CLI, cluster `nvlx-fleet` CLI, and new stable `nvlx-controller` surface now share a fail-closed operating model for configuration, compatibility, planning, approvals, execution, HA coordination, audit, security gating, and reproducible releases.
 
 > [!IMPORTANT]
-> v0.9 does not turn advisory planning into unbounded autonomy. Placement and failover decisions can be scored and gated, but disruptive cluster actions remain explicit. Power limits are never silently changed and checkpoint readiness must be proven before evacuation/failover is considered safe.
+> v1.0 still does not grant unbounded autonomous mutation. A disruptive action is planned first, fingerprinted, approved against that exact fingerprint, compatibility-checked, and only then eligible for execution. A changed plan invalidates the approval.
 
-## v0.9 highlights
+## v1.0 production contracts
 
-- **Policy-as-code.** `FleetPolicy` gates free GPU capacity, RDMA, fabric health, thermals, power headroom, alpha-DRA usage, checkpoint requirements, and cross-cluster failover.
-- **Governed placement scoring.** `placement-decide` rejects policy-ineligible targets, then deterministically scores remaining targets using free capacity, fabric/RDMA readiness, thermal state, and power headroom.
-- **Fleet SLO gates.** `slo-check` blocks progression on low healthy-node fraction, high workload-start latency, quarantined nodes, or exhausted Xid error budgets.
-- **GPU Direct Storage readiness.** `gds` checks cuFile/GDS validation tooling, storage mounts, and NVIDIA storage-path evidence before checkpoint storage is treated as ready.
-- **Run:ai/DRA visibility.** `runai` detects Run:ai scheduler components and ResourceClaim activity without coupling nvlx to a proprietary scheduler API.
-- **Power curtailment planning.** `curtailment` selects hold, scheduler-throttle, checkpoint-and-evacuate, or stop-admission-and-drain responses based on the requested power reduction and workload checkpointability. It never issues `nvidia-smi -pl` automatically.
-- **Governed failover.** `failover-plan` requires checkpoint, target capacity, and security readiness before a cross-cluster promotion is considered safe.
-- **Append-only audit journal.** `audit` records JSONL decisions with UTC timestamps, action, target, allow/deny state, and reasons.
+- **Stable configuration schema.** `schema_version: 1` is canonicalized and SHA-256 fingerprinted. Unknown top-level keys fail closed.
+- **Approval-bound execution.** Plans include operation, target, ordered steps, configuration fingerprint, and their own immutable plan fingerprint. Approval must match the exact current plan.
+- **Durable controller state.** Generation-aware state transitions prevent unsafe jumps such as `idle -> executing` and support durable JSON state writes.
+- **HA controller lease model.** `nvlx-controller ha-plan` renders Kubernetes `coordination.k8s.io/v1` Lease state with bounded lease/renew/retry timing.
+- **Kubernetes/DRA compatibility preflight.** v1.0 treats Kubernetes 1.34+ as the stable DRA API baseline and rejects `GPUCluster`/`ClusterPolicy` coexistence.
+- **GPU Operator migration safety.** In-place `ClusterPolicy -> GPUCluster` migration is rejected because NVIDIA does not support it. GPUCluster upgrade planning requires ComputeDomain CRD readiness.
+- **Production bundle integrity.** Deterministic SHA-256 bundle manifests verify configuration/release inputs and emit a Cosign `verify-blob` plan for external keyless signature validation.
+- **v0.1-v0.9 retained.** Transactional driver rollback, boot health, Secure Boot, MIG/Fabric/DCGM/NVSDM, DRA placement, GPUDirect, SLO/policy gates, curtailment, checkpointing, federation, PSIRT security gates, SBOMs, and provenance remain in force.
 
-## Commands
+## Stable controller commands
 
 ```bash
-# policy and deterministic placement
-nvlx-fleet policy-check candidate.json --policy fleet-policy.json
-nvlx-fleet placement-decide candidates.json --policy fleet-policy.json
+# validate the stable configuration contract
+nvlx-controller config-validate fleet-v1.json
 
-# SLO and runtime integrations
-nvlx-fleet slo-check --healthy-fraction 0.995 --p95-startup-seconds 45
-nvlx-fleet gds
-nvlx-fleet runai
+# production compatibility check
+nvlx-controller compat \
+  --kubernetes-version v1.35.2 \
+  --gpucluster \
+  --computedomains-crd-ready
 
-# power-aware operations
-nvlx-fleet curtailment --current-watts 1000 --target-watts 750
-nvlx-fleet curtailment --current-watts 1000 --target-watts 500 --checkpointable
+# create a reconciliation plan
+nvlx-controller reconcile-plan fleet-v1.json \
+  --kubernetes-version v1.35.2 \
+  --gpucluster \
+  --computedomains-crd-ready \
+  --operation upgrade-gpu-operator \
+  --target prod-east \
+  --step preflight \
+  --step drain-canary \
+  --step upgrade \
+  --step validate
 
-# governed disaster recovery
-nvlx-fleet failover-plan --source east --target west --namespace training --checkpoint-ready --capacity-ready --security-ready
+# approve exact plan, then verify it is still executable
+nvlx-controller approve plan.json --by operator@example
+nvlx-controller execute-check plan.json approval.json
 
-# audit a decision
-nvlx-fleet audit --path ./nvlx-audit.jsonl --action failover --target west --allowed
+# HA lease and deterministic bundle integrity
+nvlx-controller ha-plan
+nvlx-controller bundle-manifest . pyproject.toml README.md
+nvlx-controller cosign-plan manifest.json manifest.sig --identity release-workflow
 ```
 
-## Governed execution model
+## v1.0 controller lifecycle
 
 ```text
-WORKLOAD INTENT
-      |
-      v
-DRA / FABRIC / RDMA / CAPACITY INVENTORY
-      |
-      v
-FLEET POLICY ---------------------------- fail ---> DENY + AUDIT
-      |
-      v
-DETERMINISTIC PLACEMENT SCORE
-      |
-      v
-SLO + SECURITY + QUARANTINE GATES ------- fail ---> HOLD / QUARANTINE
-      |
-      v
-CHECKPOINT / GDS READINESS
-      |
-      +---- power event ---> CURTAIL / CHECKPOINT / EVACUATE PLAN
-      |
-      +---- cluster fault -> FAILOVER PLAN
-      |
-      v
-EXPLICIT OPERATOR EXECUTION
-      |
-      v
-AUDIT RECORD
+CONFIG v1
+   |
+   v
+SCHEMA VALIDATION + CONFIG FINGERPRINT
+   |
+   v
+KUBERNETES / NVIDIA COMPATIBILITY PREFLIGHT
+   |\
+   | fail -> BLOCKED + AUDIT
+   v
+DETERMINISTIC RECONCILIATION PLAN
+   |
+   v
+PLAN FINGERPRINT
+   |
+   v
+AWAITING APPROVAL
+   |
+   +---- plan changes ----> APPROVAL INVALIDATED
+   |
+   v
+APPROVED
+   |
+   v
+LEASE / LEADER CHECK
+   |
+   v
+EXECUTION ELIGIBLE
+   |
+   v
+HEALTH + SLO + SECURITY VALIDATION
+   |\
+   | fail -> ROLLBACK / QUARANTINE / BLOCK
+   v
+SUCCEEDED + AUDIT
 ```
+
+## Current platform baseline
+
+Kubernetes Dynamic Resource Allocation is a stable API in modern Kubernetes, and v1.0 uses Kubernetes 1.34+ as its production DRA baseline. NVIDIA GPU Operator 26.7 manages DRA through the singleton `GPUCluster` resource and Device Plugin allocation through `ClusterPolicy`; they cannot coexist. NVIDIA also documents that an in-place migration from `ClusterPolicy` to `GPUCluster` is unsupported and that ComputeDomain CRDs require explicit handling during GPUCluster upgrades.
 
 ## Safety invariants
 
-1. Policy rejection happens before placement ranking.
-2. Placement scoring is deterministic; ties resolve by target name rather than random selection.
-3. SLO failures block rollout/failover advancement.
-4. GDS readiness is evidence-based and does not claim every mounted filesystem is GPUDirect-capable.
-5. Run:ai integration is observational; nvlx does not impersonate or bypass the scheduler.
-6. Power curtailment is a response plan, not an implicit GPU power-limit mutation.
-7. Cross-cluster failover requires checkpoint, capacity, and security readiness simultaneously.
-8. Audit records are append-only JSONL and contain policy decisions, not credentials or GPU serial numbers.
-9. All v0.1-v0.8 rollback, PSIRT, quarantine, DRA-alpha, reproducibility, SBOM, and provenance safeguards remain in force.
+1. Unknown v1 configuration fields fail closed.
+2. Compatibility failures prevent plan execution.
+3. A plan approval is valid only for the exact plan fingerprint it approved.
+4. Controller state transitions are explicit and generation-aware.
+5. HA timing requires `retry < renew deadline < lease duration`.
+6. `GPUCluster` and `ClusterPolicy` coexistence is rejected.
+7. In-place Device Plugin-to-DRA migration is never synthesized automatically.
+8. ComputeDomain CRD readiness is mandatory before relevant GPUCluster upgrades.
+9. Bundle integrity uses deterministic SHA-256 manifests; external signatures are verified by standard tooling rather than custom cryptography.
+10. All earlier rollback, Secure Boot, quarantine, telemetry, PSIRT, SBOM, provenance, DRA-alpha, placement, checkpoint, and failover safeguards remain active.
 
 ## Development
 
