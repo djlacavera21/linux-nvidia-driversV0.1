@@ -29,16 +29,15 @@ jobs:
         run: python -m unittest discover -s tests -v
       - name: Reproducible archive smoke test
         run: |
-          python scripts/repro_release.py 1.4.0 --out /tmp/repro-a
-          python scripts/repro_release.py 1.4.0 --out /tmp/repro-b
+          python scripts/repro_release.py 1.5.0 --out /tmp/repro-a
+          python scripts/repro_release.py 1.5.0 --out /tmp/repro-b
           cmp /tmp/repro-a/SHA256SUMS /tmp/repro-b/SHA256SUMS
       - name: CLI smoke test
         run: |
-          nvlx --version
-          nvlx-controller metrics --leader | grep nvlx_controller_leader
+          nvlx --version | grep 1.5.0
           nvlx-k8s crd | grep gpufleets.nvlx.io
-          nvlx-k8s fleet prod --driver-version 610.57.04 --gpu-operator-version 26.7.0 | grep nvlx.io/fleet-protection
-          nvlx-k8s conditions --generation 2 --ready | grep '"Ready"'
-          nvlx-k8s admission-policy | grep ValidatingAdmissionPolicyBinding
-          nvlx-k8s reconcile prod --generation 2 --allowed --runtime-action execute --current-wave 0 --promoted | grep '"phase": "Progressing"'
-          nvlx-k8s finalize-check --deleting | grep '"remove_finalizer": true'
+          nvlx-k8s operator-plan prod --event-type MODIFIED --resource-version 12 --generation 3 --allowed --runtime-action execute | grep '"action": "patch-status"'
+          nvlx-k8s operator-plan prod --event-type ERROR --resource-version 12 --generation 3 | grep '"action": "relist"'
+          nvlx-k8s queue-retry 2 | grep '"retry": true'
+          nvlx-k8s ownership-check status.phase metadata.finalizers | grep '"allowed": true'
+          nvlx-k8s health --api-reachable --leader --inventory-fresh | grep '"ready": true'
