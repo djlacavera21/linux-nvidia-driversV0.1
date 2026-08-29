@@ -10,7 +10,7 @@ class FinalizerDecision:
     reasons: tuple[str,...]
     def to_dict(self): return asdict(self)
 
-def decide(*, deleting: bool, rollback_pending: bool, quarantined_nodes: int, active_execution: bool, finalizer_present: bool=True) -> FinalizerDecision:
+def decide(*, deleting: bool, rollback_pending: bool, quarantined_nodes: int, active_execution: bool, finalizer_present: bool=True, status_write_pending: bool=False) -> FinalizerDecision:
     if quarantined_nodes < 0:
         raise ValueError("quarantined_nodes must be >= 0")
     if not deleting: return FinalizerDecision("retain",False,("resource not deleting",))
@@ -19,5 +19,6 @@ def decide(*, deleting: bool, rollback_pending: bool, quarantined_nodes: int, ac
     if rollback_pending: reasons.append("rollback pending")
     if quarantined_nodes: reasons.append("quarantined nodes remain")
     if active_execution: reasons.append("execution active")
+    if status_write_pending: reasons.append("status write pending")
     if reasons: return FinalizerDecision("hold",False,tuple(reasons))
     return FinalizerDecision("finalize",True,(f"safe to remove {FINALIZER}",))

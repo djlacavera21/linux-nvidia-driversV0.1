@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "nvlx"
-version = "1.5.3"
-description = "Live Kubernetes NVIDIA GPU fleet operator with stale-generation guards, idempotent status writes, hardened finalizer sequencing, and normalized patch retry semantics"
+version = "1.5.4"
+description = "Live Kubernetes NVIDIA GPU fleet operator with duplicate-event suppression, deterministic retry jitter, ordered finalization, and graceful shutdown mutation gates"
 readme = "README.md"
 requires-python = ">=3.11"
 license = {text = "MIT"}
