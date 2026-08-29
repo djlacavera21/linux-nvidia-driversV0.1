@@ -23,11 +23,15 @@ jobs:
           python-version: ${{ matrix.python-version }}
       - name: Install package
         run: python -m pip install -e .
-      - name: Compile package
-        run: python -m compileall -q src tests
+      - name: Compile package and scripts
+        run: python -m compileall -q src tests scripts
       - name: Unit tests
         run: python -m unittest discover -s tests -v
       - name: CLI smoke test
         run: |
           nvlx --version
           nvlx detect --sysfs-root /definitely/not/here
+          nvlx repo-plan
+          nvlx prime --sysfs-root /definitely/not/here
+          nvlx initramfs-plan
+          nvlx secureboot-verify
