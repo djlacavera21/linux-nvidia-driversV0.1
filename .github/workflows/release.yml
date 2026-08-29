@@ -1,0 +1,41 @@
+name: Signed reproducible release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  id-token: write
+  attestations: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Build deterministic archive twice
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          python scripts/repro_release.py "$VERSION" --out dist/one
+          python scripts/repro_release.py "$VERSION" --out dist/two
+          cmp dist/one/SHA256SUMS dist/two/SHA256SUMS
+          mkdir -p dist/release
+          cp dist/one/* dist/release/
+      - name: Attest release provenance
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-checksums: dist/release/SHA256SUMS
+      - uses: actions/upload-artifact@v4
+        with:
+          name: nvlx-reproducible-release
+          path: dist/release/
+      - name: Publish GitHub release for tag builds
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" dist/release/* --verify-tag --generate-notes
