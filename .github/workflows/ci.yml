@@ -35,3 +35,10 @@ jobs:
           nvlx prime --sysfs-root /definitely/not/here
           nvlx initramfs-plan
           nvlx secureboot-verify
+          nvlx session
+          nvlx mig-fabric
+          nvlx health
+          nvlx telemetry --format json
+          nvlx telemetry --format prometheus
+          nvlx topology || test $? -eq 1
+          nvlx transaction-pending || test $? -eq 1
