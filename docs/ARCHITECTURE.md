@@ -2,160 +2,162 @@
 
 ## Mission
 
-`nvlx` provides a small, auditable control plane around NVIDIA's Linux driver deployment path. It does not recreate the proprietary user-space stack or silently replace a running graphics driver. The project focuses on hardware classification, compatibility checks, reproducible open-kernel-module builds, distro-native packaging/DKMS guidance, Secure Boot signing, rollback, and diagnostics.
+`nvlx` is an auditable Linux NVIDIA driver control plane. It does not recreate NVIDIA's proprietary user-space stack or silently replace an active graphics session. The project coordinates official support metadata, reproducible open-kernel-module builds, distribution-native integration, transactional upgrade state, Secure Boot, rollback, graphics-session diagnostics, data-center fabric validation, and health telemetry.
+
+## Core invariant
+
+```text
+kernel module release
+    == NVIDIA user-space release
+    == required GSP firmware release
+    == Fabric Manager release (when Fabric Manager is required)
+```
+
+A v0.4 transaction captures enough pre-change state to either validate that invariant after reboot or restore the prior state.
 
 ## Trust boundaries
 
-### Official NVIDIA GPU metadata
+### Official NVIDIA metadata and source
 
-`gpu-db-sync` retrieves the `README.md` from the exact NVIDIA `open-gpu-kernel-modules` tag pinned by `config/driver-series.toml`. Only the `Compatible GPUs` table is parsed. PCI classification prefers a three-field device/subsystem match over a generic device-ID match. An ID absent from that pinned table is reported as `unknown`, not automatically declared unsupported.
+`gpu-db-sync` reads the Compatible GPUs table from the exact NVIDIA `open-gpu-kernel-modules` tag pinned in `config/driver-series.toml`. Source builds validate `version.mk` before compilation or installation. An unrecognized PCI ID is reported as `unknown`, not guessed unsupported.
 
-### Upstream NVIDIA source
+### Package ownership
 
-The open GPU kernel modules are fetched from NVIDIA's official repository at the release pinned by this project. `version.mk` is validated before build or install, protecting against compiling one kernel-module release while configuring another.
+Distribution package managers continue to own distro-installed NVIDIA/CUDA packages. v0.4 records relevant package names and exact installed versions before a transaction. Automatic restoration is attempted only where the native package manager has a deterministic exact-version path. Unsupported exact rollback (for example Arch without cached package archives) fails visibly instead of approximating a version.
 
-### Host kernel
+### Kernel modules and initramfs
 
-The running kernel owns the ABI and build environment used for the module interface layer. Source builds require `/lib/modules/<kernel>/build` and a compatible compiler/toolchain.
+Rollback snapshots preserve NVIDIA module files for one kernel tree. Initramfs regeneration stays distro-specific and explicit except during an already-authorized automatic rollback, where nvlx attempts to rebuild the restored kernel image after package/module restoration.
 
-### User-space driver and GSP firmware
+### Secure Boot
 
-The open kernel modules are one layer of the NVIDIA Linux driver. Matching user-space components and GSP firmware remain external requirements. nvlx detects an existing `nvidia-smi` version and refuses a known kernel/user-space release mismatch during guarded installation.
+nvlx can generate and use a Machine Owner Key but never disables Secure Boot or auto-enrolls a certificate. Signature presence and signer metadata are reported separately from trust/enrollment assumptions.
 
-### Distribution package managers
+### Persistent boot guard
 
-Ubuntu, Debian, Fedora, RHEL, Arch, and NixOS adapters return explicit plans rather than mutating package repositories or host configuration. NVIDIA-validated distro/version combinations are marked separately from community-supported adapters. DKMS integration uses distro-native NVIDIA packages rather than generating an unofficial `dkms.conf` for the source snapshot.
+The boot guard is opt-in. `boot-guard-install --yes` installs and enables a systemd oneshot that only runs when `/var/lib/nvlx/transactions/pending.json` exists. It invokes post-reboot validation with automatic rollback enabled.
 
-### Secure Boot key material
-
-nvlx can generate a local RSA Machine Owner Key pair and sign built `.ko` files through the kernel's `scripts/sign-file`. Private keys are created mode `0600`, existing key material is never overwritten, and firmware enrollment remains an explicit `mokutil` + reboot operation.
-
-### Rollback storage
-
-Rollback snapshots live under `/var/lib/nvlx/rollback` by default and preserve NVIDIA kernel module files relative to one `/lib/modules/<kernel>` tree. Restoration requires root and `--yes`, runs `depmod`, and intentionally does not hot-unload the active graphics stack.
-
-## Components
+## Transaction state machine
 
 ```text
-src/nvlx/system.py
-    sysfs PCI + subsystem detection
-    kernel and distro snapshot
-    Secure Boot state
-    loaded module state
-    nvidia-smi discovery
-
-src/nvlx/gpu_db.py
-    pinned official NVIDIA support-table retrieval
-    Markdown parsing
-    exact/generic PCI classification
-
-src/nvlx/distro.py
-    Ubuntu/Debian adapters
-    Fedora/RHEL adapters
-    Arch and NixOS community adapters
-    package/DKMS plans
-
-src/nvlx/dkms.py
-    DKMS status inspection
-    distro-native NVIDIA DKMS integration boundary
-
-src/nvlx/secureboot.py
-    MOK key generation
-    enrollment command generation
-    built-module signing
-
-src/nvlx/rollback.py
-    installed-module snapshots
-    manifest discovery
-    explicit restore + depmod
-
-src/nvlx/compat.py
-    NVIDIA driver discovery
-    CUDA family compatibility
-    NVIDIA Container Toolkit/component alignment
-    Docker/Podman presence
-
-src/nvlx/doctor.py
-    preflight checks
-    build readiness
-    conflict warnings
-
-src/nvlx/config.py
-    pinned driver release
-    supported build architectures
-    upstream repository
-
-src/nvlx/build.py
-    upstream source fetch
-    source version validation
-    module build
-    guarded modules_install
-
-src/nvlx/cli.py
-    command surface
-    human-readable planning
-    JSON automation output
+prepared
+  |  package-state.json captured
+  |  module rollback snapshot captured
+  v
+modules_install
+  |
+  v
+pending-reboot
+  |  pending.json armed
+  |  boot_id_before recorded
+  v
+post-reboot validation
+  |\
+  | healthy
+  |  -> validated -> pending marker removed
+  |
+  | failed
+  |  -> package restore
+  |  -> module restore
+  |  -> depmod
+  |  -> initramfs regeneration (best effort)
+  |  -> rolled-back -> pending marker removed
+  |
+  ` rollback error -> rollback-failed (marker retained for operator recovery)
 ```
 
-## Command lifecycle
+Calling validation before a reboot does **not** trigger rollback; the transaction remains `pending-reboot`.
 
-### Read-only inspection
+## Health validation
 
-`detect`, `doctor`, `plan`, `gpu-support`, `distro-plan`, `dkms-status`, `secureboot-plan`, `rollback-list`, and `compat` are read-only against the host. `gpu-db-sync` writes only the selected cache file.
+A pending transaction is healthy only after crossing a reboot boundary and satisfying:
 
-### Source build
+1. `nvidia-smi` can communicate with the driver;
+2. the detected driver version equals the transaction target;
+3. the core `nvidia` kernel module is loaded.
 
-`fetch` clones the exact configured NVIDIA release. `build` compiles it. `secureboot-sign` can then sign the built `.ko` files with an explicitly supplied key/certificate before `install` runs `modules_install`.
+The broader `nvlx health` command additionally reports GPU count, installed module-signature state, session warnings, topology availability, and Fabric Manager/DCGM compatibility.
 
-### Distribution-native path
+## Graphics-session diagnostics
 
-`distro-plan` emits package-manager/declarative commands. `dkms-status` inspects the current DKMS state. nvlx does not mix a custom source-DKMS recipe with package-manager owned driver files.
+`session.py` inspects:
 
-### Rollback path
+- `XDG_SESSION_TYPE` / Wayland display hints;
+- `nvidia_drm` `modeset` and `fbdev` module parameters;
+- GBM library availability;
+- NVIDIA EGL-Wayland/EGL library availability;
+- Xwayland presence;
+- DRM device nodes.
 
-Before a manual driver transition, `rollback-snapshot` preserves the current NVIDIA modules. `rollback-apply` removes NVIDIA module files for that same kernel tree, restores the snapshot paths, and regenerates dependency metadata. A reboot or controlled module transition is still required.
+This reflects NVIDIA's GBM/Wayland requirement that DRM KMS and the appropriate GBM/EGL components be present rather than assuming a Wayland environment variable proves driver readiness.
 
-## Version-alignment invariant
+## Multi-GPU topology
+
+`topology.py` consumes the official `nvidia-smi topo -m` interface. It preserves the raw matrix and derives GPU count, parsed matrix rows, symmetric NVLink adjacency count, and NVSwitch evidence. The raw output remains available because future hardware generations can introduce topology labels not yet modeled by nvlx.
+
+## MIG / Fabric Manager / DCGM
+
+`mig.py` treats these as separate but related layers:
+
+- MIG mode and visible MIG instances come from `nvidia-smi`;
+- Fabric Manager version comes from `nv-fabricmanager -v`;
+- Fabric Manager service state comes from systemd when available;
+- DCGM version is detected from `dcgmi` or `nv-hostengine`.
+
+For the pinned R610 610.57.04 baseline, Fabric Manager is expected to match 610.57.04 and DCGM must be 4.3.x or newer.
+
+## Telemetry
+
+`telemetry.py` exposes the same health model as:
+
+- structured JSON for automation;
+- Prometheus text exposition for scraping or node-level collection.
+
+Metrics include overall health, NVIDIA GPU count, module and `nvidia-smi` status, topology availability, NVLink adjacency, NVSwitch evidence, MIG instance count, Fabric Manager service/alignment, and DCGM compatibility.
+
+## Component map
 
 ```text
-open kernel module release == NVIDIA user-space release == required GSP firmware release
+system.py          host, PCI, modules, driver version
+config.py          pinned NVIDIA release policy
+gpu_db.py          official PCI support classification
+distro.py          distro-native package/DKMS plans
+repository.py      branch/repository pinning plans
+dkms.py            DKMS inspection
+build.py           fetch/build + transactional install
+package_state.py   NVIDIA/CUDA package inventory + restore strategy
+rollback.py        kernel-module snapshots + explicit restore
+transaction.py     transaction journal + post-boot guard
+initramfs.py       distro-specific initramfs actions
+secureboot.py      MOK generation/signing/signature inspection
+prime.py           hybrid/PRIME classification
+session.py         Wayland/GBM/DRM session checks
+topology.py        multi-GPU/NVLink/NVSwitch topology
+mig.py             MIG/Fabric Manager/DCGM compatibility
+compat.py          CUDA and Container Toolkit compatibility
+health.py          boot/runtime health aggregation
+telemetry.py       JSON + Prometheus health surfaces
+report.py          sanitized support bundle
+cli.py             command surface
 ```
 
-Package manager integration, CUDA validation, signing, and rollback must preserve or restore this invariant.
+## Safety rules
 
-## CUDA compatibility model
+- Never hot-unload an active graphics stack automatically.
+- Never disable Secure Boot or auto-enroll a signing key.
+- Never start a direct module install without package and module recovery state.
+- Never treat a pre-reboot transaction as a failed boot.
+- Never guess a package downgrade when an exact restore path is unavailable.
+- Never auto-merge an NVIDIA release bump.
+- Preserve raw diagnostic evidence where parsing may be generation-specific.
+- Treat report sanitization as risk reduction, not a guarantee of anonymity.
 
-nvlx encodes NVIDIA's minor-version compatibility family floors:
+## v0.5 candidate targets
 
-```text
-CUDA 11.x -> driver >= 450
-CUDA 12.x -> driver >= 525
-CUDA 13.x -> driver >= 580
-```
-
-This is a minimum-driver check, not a claim that every CUDA feature works on every GPU. GPU architecture support remains a separate concern.
-
-## Container Toolkit model
-
-The toolkit layer is deliberately separate from kernel-driver installation. nvlx detects `nvidia-ctk`, checks the four core container package versions where native package metadata is available, and warns on incomplete/mixed component versions. Version-specific known-issue notices are kept in compatibility logic rather than hidden in installer behavior.
-
-## Next targets
-
-1. Add sanitized `nvlx report` diagnostic bundles.
-2. Add optional automatic rollback snapshot creation immediately before guarded installation.
-3. Add initramfs regeneration adapters with explicit preview/confirmation.
-4. Add package-repository validation and branch pinning helpers.
-5. Add openSUSE/SLES and immutable/container-host adapters.
-6. Add PRIME/hybrid-laptop classification and configuration guidance.
-7. Add signed-module verification through `modinfo`/kernel keyring inspection.
-8. Add release automation that opens version-bump PRs when NVIDIA publishes a new stable open-module release.
-
-## Non-goals
-
-- reimplementing CUDA;
-- redistributing NVIDIA proprietary libraries;
-- automatically bypassing or disabling Secure Boot;
-- silently blacklisting Nouveau;
-- hot-swapping the active display driver;
-- patching around NVIDIA product restrictions;
-- claiming GPU support without upstream evidence.
+- package-manager transaction plugins that validate repository availability of rollback versions before upgrade;
+- systemd watchdog/timeout policy and rollback retry limits;
+- DCGM-exporter integration and per-GPU performance/error counters;
+- NVSDM/NVSwitch monitoring for Blackwell-class systems;
+- MIG profile lifecycle planning and Kubernetes GPU Operator integration;
+- immutable host adapters (rpm-ostree, transactional-update, image-based systems);
+- signed release artifacts and reproducible package builds.
