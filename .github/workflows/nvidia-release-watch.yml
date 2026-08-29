@@ -1,0 +1,48 @@
+name: NVIDIA release watch
+
+on:
+  schedule:
+    - cron: '17 13 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Detect and apply newer NVIDIA tag
+        id: release
+        shell: bash
+        run: |
+          current=$(sed -n 's/^version = "\([^"]*\)"/\1/p' config/driver-series.toml)
+          candidate=$(python scripts/check_nvidia_release.py --apply)
+          echo "current=$current" >> "$GITHUB_OUTPUT"
+          echo "candidate=$candidate" >> "$GITHUB_OUTPUT"
+      - name: Validate candidate source tag
+        if: steps.release.outputs.candidate != ''
+        run: |
+          git ls-remote --exit-code --tags https://github.com/NVIDIA/open-gpu-kernel-modules.git "refs/tags/${{ steps.release.outputs.candidate }}"
+          python -m compileall -q src tests scripts
+          python -m unittest discover -s tests -v
+      - name: Open update PR
+        if: steps.release.outputs.candidate != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CANDIDATE: ${{ steps.release.outputs.candidate }}
+        shell: bash
+        run: |
+          branch="automation/nvidia-${CANDIDATE}"
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git checkout -b "$branch"
+          git add config/driver-series.toml
+          git commit -m "Bump NVIDIA driver baseline to ${CANDIDATE}"
+          git push --force-with-lease origin "$branch"
+          gh pr create --base main --head "$branch" --title "Bump NVIDIA baseline to ${CANDIDATE}" --body "Automated NVIDIA open-gpu-kernel-modules release update. CI validates the nvlx codebase; review upstream release notes and supported-GPU metadata before merge." || true
