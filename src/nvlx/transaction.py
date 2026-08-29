@@ -6,7 +6,7 @@ from pathlib import Path
 import json, os, shutil, subprocess, uuid
 from .build import BuildError
 from .config import DriverConfig
-from .package_state import PackageSnapshot, load_package_snapshot, restore_package_state, write_package_snapshot
+from .package_state import load_package_snapshot, restore_package_state, write_package_snapshot
 from .rollback import apply_snapshot, create_snapshot
 from .system import loaded_modules, nvidia_smi_driver_version, running_kernel
 
@@ -55,19 +55,21 @@ def load_pending(root:Path|None=None)->Transaction|None:
     try: return load_transaction(path)
     except (OSError,ValueError,TypeError): return None
 
-def _health_reason(tx:Transaction)->str|None:
+def _post_reboot_health_reason(tx:Transaction)->str|None:
     version=nvidia_smi_driver_version()
     if version is None: return "nvidia-smi is unavailable or cannot communicate with the driver"
     if version!=tx.target_version: return f"driver version {version} does not match transaction target {tx.target_version}"
-    modules=loaded_modules()
-    if "nvidia" not in modules: return "nvidia kernel module is not loaded"
-    if tx.boot_id_before and _boot_id()==tx.boot_id_before: return "transaction has not crossed a reboot boundary"
+    if "nvidia" not in loaded_modules(): return "nvidia kernel module is not loaded"
     return None
 
 def validate_pending(*, auto_rollback:bool=False, root:Path|None=None)->tuple[Transaction|None,bool,str]:
     storage=root or transaction_root(); tx=load_pending(storage)
     if tx is None: return None,True,"no pending transaction"
-    reason=_health_reason(tx)
+    current_boot=_boot_id()
+    if tx.boot_id_before and current_boot==tx.boot_id_before:
+        waiting=Transaction(**{**tx.to_dict(),"state":"pending-reboot","failure_reason":None}); _write(waiting,storage)
+        return waiting,False,"transaction is awaiting a reboot before health validation"
+    reason=_post_reboot_health_reason(tx)
     if reason is None:
         done=Transaction(**{**tx.to_dict(),"state":"validated","failure_reason":None}); _write(done,storage); pending_path(storage).unlink(missing_ok=True); return done,True,"driver healthy"
     failed=Transaction(**{**tx.to_dict(),"state":"failed","failure_reason":reason}); _write(failed,storage)
@@ -75,7 +77,6 @@ def validate_pending(*, auto_rollback:bool=False, root:Path|None=None)->tuple[Tr
     try:
         restore_package_state(load_package_snapshot(Path(tx.package_snapshot)))
         apply_snapshot(Path(tx.rollback_snapshot),confirmed=True)
-        # Rebuild initramfs after restoring modules/packages when a safe adapter exists.
         from .initramfs import regenerate_initramfs
         try: regenerate_initramfs(kernel=tx.kernel,confirmed=True)
         except Exception: pass
