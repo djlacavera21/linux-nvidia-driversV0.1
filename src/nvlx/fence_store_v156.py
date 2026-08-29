@@ -1,8 +1,7 @@
 """Durable fencing-token persistence with integrity verification."""
 from __future__ import annotations
-from dataclasses import asdict
 from pathlib import Path
-import hashlib, json, os, tempfile
+import hashlib, hmac, json, os, tempfile
 from .leadership_v155 import FenceToken
 
 _FORMAT=2
@@ -47,6 +46,6 @@ def load(path: str | Path) -> FenceToken | None:
     token_data=data.get("token")
     if not isinstance(token_data,dict) or not isinstance(data.get("sha256"),str):
         raise ValueError("invalid persisted fencing envelope values")
-    if not hashlib.compare_digest(_digest(token_data),data["sha256"]):
+    if not hmac.compare_digest(_digest(token_data),data["sha256"]):
         raise ValueError("persisted fencing token integrity check failed")
     return _parse_token(token_data)
