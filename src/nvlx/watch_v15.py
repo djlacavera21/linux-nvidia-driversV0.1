@@ -11,8 +11,14 @@ class WatchDecision:
     def to_dict(self): return asdict(self)
 
 def decide(event_type: str, resource_version: str | None, *, expired: bool=False) -> WatchDecision:
-    et=(event_type or "").upper()
-    if expired or et=="ERROR": return WatchDecision("relist","",True,("watch cursor expired or errored",))
-    if et not in {"ADDED","MODIFIED","DELETED","BOOKMARK"}: return WatchDecision("hold",resource_version or "",True,("unsupported watch event",))
-    if et=="BOOKMARK": return WatchDecision("checkpoint",resource_version or "",False,())
-    return WatchDecision("reconcile",resource_version or "",False,())
+    et=(event_type or "").strip().upper()
+    rv=(resource_version or "").strip()
+    if expired or et=="ERROR":
+        return WatchDecision("relist","",True,("watch cursor expired or errored",))
+    if et not in {"ADDED","MODIFIED","DELETED","BOOKMARK"}:
+        return WatchDecision("hold",rv,True,("unsupported watch event",))
+    if not rv:
+        return WatchDecision("relist","",True,("resourceVersion required to advance watch cursor",))
+    if et=="BOOKMARK":
+        return WatchDecision("checkpoint",rv,False,())
+    return WatchDecision("reconcile",rv,False,())
