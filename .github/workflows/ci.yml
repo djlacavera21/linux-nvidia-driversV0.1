@@ -29,20 +29,26 @@ jobs:
         run: python -m unittest discover -s tests -v
       - name: Reproducible archive smoke test
         run: |
-          python scripts/repro_release.py 1.5.5 --out /tmp/repro-a
-          python scripts/repro_release.py 1.5.5 --out /tmp/repro-b
+          python scripts/repro_release.py 1.5.6 --out /tmp/repro-a
+          python scripts/repro_release.py 1.5.6 --out /tmp/repro-b
           cmp /tmp/repro-a/SHA256SUMS /tmp/repro-b/SHA256SUMS
       - name: CLI smoke test
         run: |
-          nvlx --version | grep 1.5.5
-          nvlx-k8s operator-plan prod --event-type MODIFIED --resource-version 12 --generation 3 --allowed --runtime-action execute | grep '"action": "patch-status"'
+          nvlx --version | grep 1.5.6
           python - <<'PY'
+          import tempfile
+          from pathlib import Path
           from nvlx.leadership_v155 import FenceToken, validate
-          from nvlx.operator_v15 import plan
-          from nvlx.shutdown_v154 import evaluate
-          token=FenceToken("controller-a",7,"42")
-          assert validate(token,current_holder="controller-a",current_epoch=7,current_resource_version="42").allowed
-          assert not validate(token,current_holder="controller-b",current_epoch=8,current_resource_version="43").allowed
-          assert plan("prod",event_type="MODIFIED",resource_version="12",generation=3,allowed=True,runtime_action="execute",mutation_fence_ok=False).action == "fenced"
-          assert evaluate(terminating=False,active_mutation=True,leadership_valid=False).action == "fence-drain"
+          from nvlx.fence_store_v156 import save, load
+          from nvlx.lease_renewal_v156 import classify
+          with tempfile.TemporaryDirectory() as d:
+              p=Path(d)/"fence.json"
+              token=FenceToken("controller-a",7,"42")
+              save(p,token)
+              restored=load(p)
+              assert restored == token
+              assert validate(restored,current_holder="controller-a",current_epoch=7,current_resource_version="42").allowed
+              assert not validate(restored,current_holder="controller-b",current_epoch=8,current_resource_version="43").allowed
+          assert classify(409,holder_unchanged=True,resource_version_unchanged=False).action == "relist-fence"
+          assert not classify(503,holder_unchanged=True,resource_version_unchanged=True).leadership_valid
           PY
