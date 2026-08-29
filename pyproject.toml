@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "nvlx"
-version = "1.0.0"
-description = "Production NVIDIA GPU fleet controller with stable configuration contracts, approval-bound execution, HA leases, migration preflight, policy/SLO governance, and reproducible provenance"
+version = "1.1.0"
+description = "Production NVIDIA GPU fleet controller with HA runtime hardening, approval lifecycle, tamper-evident audit, state migrations, metrics, and rollback-safe execution records"
 readme = "README.md"
 requires-python = ">=3.11"
 license = {text = "MIT"}
