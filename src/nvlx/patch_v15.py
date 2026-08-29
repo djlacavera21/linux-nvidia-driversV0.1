@@ -20,9 +20,9 @@ def plan(resource_version: str, *, subresource: str="status", field_manager: str
     return PatchPlan(subresource,"application/merge-patch+json",field_manager,rv,False,True,())
 
 def classify_status(status_code: int) -> tuple[str,bool]:
-    if status_code in {200,201}: return "success",False
-    if status_code==404: return "gone",False
-    if status_code==409: return "relist-retry",True
-    if status_code==429 or 500 <= status_code <= 599: return "retry",True
+    if status_code in {200,201,202,204}: return "success",False
+    if status_code in {404,410}: return "gone",False
+    if status_code in {409,412}: return "relist-retry",True
+    if status_code in {408,425,429} or 500 <= status_code <= 599: return "retry",True
     if 400 <= status_code <= 499: return "hold",False
     return "hold",False

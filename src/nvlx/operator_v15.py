@@ -5,6 +5,8 @@ from .watch_v15 import decide as watch_decide
 from .patch_v15 import plan as patch_plan
 from .workqueue_v15 import retry as retry_plan
 from .reconcile_v14 import reconcile
+from .generation_v153 import evaluate as generation_evaluate
+from .status_write_v153 import changed as status_changed
 
 @dataclass(frozen=True)
 class OperatorPlan:
@@ -12,13 +14,14 @@ class OperatorPlan:
     reconcile: dict|None
     patch: dict|None
     queue: dict|None
+    status_fingerprint: str|None = None
     def to_dict(self): return asdict(self)
 
 def _queue(attempt: int):
     q=retry_plan(attempt)
     return q.to_dict()
 
-def plan(name: str, *, event_type: str, resource_version: str, generation: int, allowed: bool, runtime_action: str, reasons=(), current_wave: int=0, promoted: bool=False, attempt: int=0, expired: bool=False) -> OperatorPlan:
+def plan(name: str, *, event_type: str, resource_version: str, generation: int, allowed: bool, runtime_action: str, reasons=(), current_wave: int=0, promoted: bool=False, attempt: int=0, expired: bool=False, latest_generation: int|None=None, previous_status_fingerprint: str|None=None) -> OperatorPlan:
     w=watch_decide(event_type,resource_version,expired=expired)
     if w.action=="relist":
         q=_queue(attempt)
@@ -29,12 +32,20 @@ def plan(name: str, *, event_type: str, resource_version: str, generation: int, 
         return OperatorPlan("dead-letter" if q["dead_letter"] else "hold",None,None,q)
     if (event_type or "").strip().upper()=="DELETED":
         return OperatorPlan("observe-delete",None,None,None)
+    if latest_generation is not None:
+        gd=generation_evaluate(generation,latest_generation)
+        if gd.stale:
+            return OperatorPlan("discard-stale",None,None,None)
     r=reconcile(name,generation=generation,allowed=allowed,runtime_action=runtime_action,runtime_reasons=reasons,current_wave=current_wave,promoted=promoted)
+    rd=r.to_dict()
+    did_change,status_fp=status_changed(rd,previous_status_fingerprint)
+    if not did_change:
+        return OperatorPlan("status-noop",rd,None,None,status_fp)
     p=patch_plan(resource_version,subresource="status")
     if not p.valid:
         q=_queue(attempt)
-        return OperatorPlan("dead-letter" if q["dead_letter"] else "hold",r.to_dict(),p.to_dict(),q)
+        return OperatorPlan("dead-letter" if q["dead_letter"] else "hold",rd,p.to_dict(),q,status_fp)
     q=_queue(attempt) if r.requeue else None
     if q and q["dead_letter"]:
-        return OperatorPlan("dead-letter",r.to_dict(),p.to_dict(),q)
-    return OperatorPlan("patch-status",r.to_dict(),p.to_dict(),q)
+        return OperatorPlan("dead-letter",rd,p.to_dict(),q,status_fp)
+    return OperatorPlan("patch-status",rd,p.to_dict(),q,status_fp)
