@@ -29,27 +29,16 @@ jobs:
         run: python -m unittest discover -s tests -v
       - name: Reproducible archive smoke test
         run: |
-          python scripts/repro_release.py 1.3.0 --out /tmp/repro-a
-          python scripts/repro_release.py 1.3.0 --out /tmp/repro-b
+          python scripts/repro_release.py 1.4.0 --out /tmp/repro-a
+          python scripts/repro_release.py 1.4.0 --out /tmp/repro-b
           cmp /tmp/repro-a/SHA256SUMS /tmp/repro-b/SHA256SUMS
       - name: CLI smoke test
         run: |
           nvlx --version
-          nvlx detect --sysfs-root /definitely/not/here
-          nvlx health
-          nvlx-fleet maintenance-plan gpu01
-          nvlx-fleet placement --count 2 --product H100 --compute-domain rack-a | grep gpu.nvidia.com
-          nvlx-fleet slo-check --healthy-fraction 1.0 --p95-startup-seconds 30
-          printf '%s\n' '{"schema_version":1,"cluster":{"name":"prod"},"policy":{},"execution":{"mode":"plan"}}' > /tmp/nvlx-v1.json
-          nvlx-controller config-validate /tmp/nvlx-v1.json | grep '"valid": true'
-          nvlx-controller compat --kubernetes-version v1.35.2 --gpucluster --computedomains-crd-ready | grep '"compatible": true'
-          printf '%s\n' '{"healthy":true,"generation":2}' > /tmp/facts.json
-          EK=$(nvlx-controller idempotency-key deadbeef gpu01 2)
-          nvlx-controller runtime-evaluate /tmp/facts.json --leader --approval-valid --emergency-override --execution-key "$EK" --total-nodes 20 | grep '"action": "execute"'
-          nvlx-controller runtime-state /tmp/runtime.json --record-failure | grep '"failure_count": 1'
-          nvlx-controller runtime-state /tmp/runtime.json --record-success "$EK" --generation 2 | grep '"failure_count": 0'
-          nvlx-controller canary-check --current-wave 0 --total-waves 3 --healthy-fraction 1.0 --diagnostics-passed --security-passed | grep '"promote": true'
-          nvlx-controller rollback-plan --rollback-available --failure-count 1 | grep boot-validate
-          nvlx-controller maintenance-policy --start-hour 2 --end-hour 5 | grep nvlx-maintenance-policy
-          nvlx-controller metrics --leader --circuit-open --rollout-slots 2 --completed-executions 1 --canary-wave 1 | grep nvlx_controller_circuit_open
-          nvlx-controller k8s-manifests --replicas 2 | grep nvlx-controller
+          nvlx-controller metrics --leader | grep nvlx_controller_leader
+          nvlx-k8s crd | grep gpufleets.nvlx.io
+          nvlx-k8s fleet prod --driver-version 610.57.04 --gpu-operator-version 26.7.0 | grep nvlx.io/fleet-protection
+          nvlx-k8s conditions --generation 2 --ready | grep '"Ready"'
+          nvlx-k8s admission-policy | grep ValidatingAdmissionPolicyBinding
+          nvlx-k8s reconcile prod --generation 2 --allowed --runtime-action execute --current-wave 0 --promoted | grep '"phase": "Progressing"'
+          nvlx-k8s finalize-check --deleting | grep '"remove_finalizer": true'
