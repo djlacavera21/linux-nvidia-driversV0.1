@@ -17,6 +17,8 @@ class NvidiaDevice:
     vendor_id: str
     device_id: str
     class_code: str
+    subsystem_vendor_id: str = ""
+    subsystem_device_id: str = ""
 
     def to_dict(self) -> dict[str, str]:
         return asdict(self)
@@ -30,11 +32,7 @@ def _read_text(path: Path, default: str = "") -> str:
 
 
 def detect_nvidia_devices(sysfs_root: Path = Path("/sys/bus/pci/devices")) -> list[NvidiaDevice]:
-    """Return NVIDIA PCI functions discovered through sysfs.
-
-    Reading sysfs instead of parsing lspci keeps the detector dependency-free and
-    makes it straightforward to test with a synthetic filesystem tree.
-    """
+    """Return NVIDIA PCI functions discovered through sysfs."""
     devices: list[NvidiaDevice] = []
     if not sysfs_root.exists():
         return devices
@@ -49,6 +47,8 @@ def detect_nvidia_devices(sysfs_root: Path = Path("/sys/bus/pci/devices")) -> li
                 vendor_id=vendor,
                 device_id=_read_text(entry / "device").lower(),
                 class_code=_read_text(entry / "class").lower(),
+                subsystem_vendor_id=_read_text(entry / "subsystem_vendor").lower(),
+                subsystem_device_id=_read_text(entry / "subsystem_device").lower(),
             )
         )
     return devices
@@ -131,6 +131,8 @@ def host_snapshot(sysfs_root: Path = Path("/sys/bus/pci/devices")) -> dict[str, 
     return {
         "kernel": running_kernel(),
         "distribution": os_release.get("PRETTY_NAME") or os_release.get("NAME") or "unknown",
+        "distribution_id": os_release.get("ID", "unknown"),
+        "distribution_version": os_release.get("VERSION_ID", "unknown"),
         "architecture": platform.machine(),
         "secure_boot": secure_boot_enabled(),
         "nvidia_devices": [device.to_dict() for device in detect_nvidia_devices(sysfs_root)],
