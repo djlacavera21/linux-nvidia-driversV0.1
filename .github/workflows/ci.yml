@@ -29,8 +29,8 @@ jobs:
         run: python -m unittest discover -s tests -v
       - name: Reproducible archive smoke test
         run: |
-          python scripts/repro_release.py 0.6.0 --out /tmp/repro-a
-          python scripts/repro_release.py 0.6.0 --out /tmp/repro-b
+          python scripts/repro_release.py 0.7.0 --out /tmp/repro-a
+          python scripts/repro_release.py 0.7.0 --out /tmp/repro-b
           cmp /tmp/repro-a/SHA256SUMS /tmp/repro-b/SHA256SUMS
       - name: CLI smoke test
         run: |
@@ -60,3 +60,5 @@ jobs:
           nvlx-fleet waves gpu03 gpu01 gpu02 --canaries 1 --wave-size 2
           nvlx-fleet alerts | grep NvlxGpuXidError
           nvlx-fleet advance-check --qualified --diagnostics-passed --security-passed
+          nvlx-fleet fabric-domains gpu03 gpu01 gpu02 --size 2 | grep fabric-000
+          nvlx-fleet admission-policy | grep ValidatingAdmissionPolicy

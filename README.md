@@ -1,123 +1,83 @@
-# Linux NVIDIA Drivers v0.6
+# Linux NVIDIA Drivers v0.7
 
-`nvlx` is a Linux NVIDIA driver safety/control toolkit. v0.6 adds a cluster-aware `nvlx-fleet` surface for qualification, maintenance, diagnostics, quarantine, canary rollout, alerting, security gating, and supply-chain provenance.
+`nvlx` now treats a GPU fleet as a **resource fabric**, not just a set of driver-managed nodes. v0.7 layers DRA/CDI qualification, NVLink/NVSwitch fabric health, Network Operator/RDMA readiness, capacity-fragmentation reporting, confidential-GPU validation, and fail-closed admission guardrails on top of the v0.6 fleet safety model.
 
 > [!IMPORTANT]
-> Host driver operations remain explicit and guarded. Cluster mutation is never implicit: drain, quarantine, uncordon, unquarantine, and diagnostic burn-in require deliberate operator actions.
+> v0.7 remains inspection-first. It does not silently migrate a cluster from Device Plugin to DRA, repartition MIG, rewrite networking, or remove quarantine. Mutating maintenance and quarantine actions retain the explicit confirmation model.
 
-## v0.6 highlights
+## v0.7 highlights
 
-- **Cluster-wide node qualification.** `nvlx-fleet qualify` checks Kubernetes Ready/schedulable state, GPU presence, GPU-driver upgrade labels, and disabled GPU Operator validators.
-- **Maintenance/drain orchestration.** Preview or execute `cordon -> drain`; recovery is a separate explicit `uncordon` command.
-- **GPU Operator ClusterPolicy validation.** Checks that `cluster-policy` exists, reconciles to a ready/success state, DCGM Exporter is enabled, and MIG strategy is recognized.
-- **DCGM diagnostic burn-in.** Plans DCGM diagnostic levels 1-4 and executes them only with `--yes` and a bounded timeout.
-- **GPU/NVSwitch fault quarantine.** Applies an `nvlx.io/quarantined=true` label plus a `NoSchedule` GPU-fault taint; unquarantine is explicit.
-- **Prometheus alert rules.** Generates rules for host health, Xid events, uncorrected ECC, NVSwitch faults, and stale transactions.
-- **Fleet upgrade waves/canaries.** Deterministic canary-first wave planning and a hard advancement gate for node qualification, diagnostics, security posture, and quarantine count.
-- **Automatic NVIDIA PSIRT gating.** A daily/PR workflow diffs NVIDIA's public `product-security` repository from a reviewed baseline. New or changed bulletins mentioning managed GPU-driver/DCGM/GPU Operator/Fabric/NVSDM/NVSwitch/NVOS components fail the gate pending review.
-- **SBOM + SLSA provenance.** Tagged reproducible releases generate an SPDX JSON SBOM, GitHub build-provenance attestation, and signed SBOM attestation after deterministic archive verification.
+- **DRA/CDI qualification.** `nvlx-fleet dra` identifies `GPUCluster` versus `ClusterPolicy`, rejects coexistence, counts ComputeDomains, and surfaces enabled alpha DRA features.
+- **Fabric health.** `nvlx-fleet fabric` checks `nvidia-smi topo -m`, NVLink edges, NVSwitch presence, and Fabric Manager readiness.
+- **Topology domains.** `fabric-domains` creates deterministic topology-domain assignments for planners/canaries without mutating node labels.
+- **Network Operator/RDMA readiness.** Detects NVIDIA/Mellanox NIC/RDMA labels and checks for a Network Operator `NicClusterPolicy`.
+- **GPU capacity/fragmentation.** Reports allocatable, requested, free GPU capacity and nodes with stranded free capacity.
+- **Confidential GPU readiness.** Validates `vm-passthrough` node separation and Kata runtime availability for confidential-container pools.
+- **Admission guardrails.** Generates a fail-closed Kubernetes `ValidatingAdmissionPolicy` that protects quarantined-node state from generic node updates.
+- **v0.6 retained.** Cluster qualification, guarded drain/uncordon, ClusterPolicy validation, DCGM burn-in, quarantine, Prometheus rules, canary waves, PSIRT gating, SBOM and provenance remain intact.
 
-## Current ecosystem assumptions
+## Current NVIDIA ecosystem assumptions
 
-The repository driver baseline remains **610.57.04**. GPU Operator planning targets **v26.7.0**. NVIDIA GPU Operator 26.7 manages the Device Plugin `ClusterPolicy` path and includes DCGM/DCGM Exporter/validator components; NVIDIA also documents DRA as a distinct `GPUCluster` path that must not coexist with `ClusterPolicy`.
+The driver baseline remains **610.57.04** and GPU Operator planning targets **v26.7.0**. GPU Operator 26.7 documents DRA Driver v0.5.0 as an alternative to the Device Plugin path: a cluster can have `GPUCluster` or `ClusterPolicy`, but not both. Full GPU/existing MIG allocation and ComputeDomains are GA; DynamicMIG, MPS, NVML health checks, passthrough and time-slicing DRA feature gates remain alpha and are surfaced by v0.7 rather than silently accepted.
 
-The current security baseline pins NVIDIA `product-security` commit `6e8ef1666730b8906a3690505bb9f4311e68c228`. Updating that value is a security-review action, not an automated self-approval.
+GPU Operator uses CDI by default starting with v25.10.0. v0.7 therefore treats CDI/DRA state as first-class fleet metadata rather than assuming the legacy runtime-class model.
 
-## Fleet commands
+## New commands
 
 ```bash
-# qualification and policy
-nvlx-fleet qualify
-nvlx-fleet clusterpolicy
+# resource API and topology
+nvlx-fleet dra
+nvlx-fleet fabric
+nvlx-fleet fabric-domains gpu01 gpu02 gpu03 gpu04 --size 2
 
-# maintenance
-nvlx-fleet maintenance-plan gpu01 --timeout 10m
-sudo -E nvlx-fleet drain gpu01 --timeout 10m --yes
-sudo -E nvlx-fleet uncordon gpu01 --yes
+# network and capacity
+nvlx-fleet network
+nvlx-fleet capacity
 
-# DCGM burn-in
-nvlx-fleet diag-plan --level 3 --timeout-sec 900
-sudo -E nvlx-fleet diag-run --level 3 --timeout-sec 900 --yes
+# confidential GPU pool readiness
+nvlx-fleet confidential
 
-# quarantine
-nvlx-fleet quarantine-plan gpu01 "Xid 79"
-sudo -E nvlx-fleet quarantine gpu01 "Xid 79" --yes
-sudo -E nvlx-fleet unquarantine gpu01 --yes
-
-# alert rules
-nvlx-fleet alerts > nvlx-gpu-alerts.yaml
-
-# canary/waves
-nvlx-fleet waves gpu01 gpu02 gpu03 gpu04 --canaries 1 --wave-size 2
-nvlx-fleet advance-check --qualified --diagnostics-passed --security-passed
-
-# security
-nvlx-fleet security-gate --dcgm-exporter-version 4.8.3
-python scripts/check_nvidia_security.py
+# generate fail-closed quarantine admission guardrail
+nvlx-fleet admission-policy > nvlx-gpu-safety.json
 ```
 
-## Rollout model
+## Resource-fabric model
 
 ```text
-DISCOVER GPU NODES
-       |
-       v
-QUALIFY + CLUSTERPOLICY VALIDATION
-       |
-       +---- fail ----> STOP
-       |
-       v
-CANARY WAVE
-       |
-       v
-CORDON + DRAIN
-       |
-       v
-DRIVER / OPERATOR CHANGE
-       |
-       v
-DCGM DIAGNOSTIC BURN-IN
-       |
-       +---- fault ----> QUARANTINE + STOP ADVANCEMENT
-       |
-       v
-SECURITY GATE + HEALTH CHECK
-       |
-       +---- fail ----> STOP
-       |
-       v
-UNCORDON CANARY
-       |
-       v
-ADVANCE NEXT WAVE
+KUBERNETES NODE INVENTORY
+          |
+          v
+GPU OPERATOR + DRA/CDI MODE
+          |
+          +---- GPUCluster + ClusterPolicy ----> STOP
+          |
+          v
+GPU / NVLINK / NVSWITCH FABRIC
+          |
+          +---- unhealthy FM/fabric -----------> QUARANTINE / STOP
+          |
+          v
+NETWORK OPERATOR + RDMA READINESS
+          |
+          v
+CAPACITY + FRAGMENTATION
+          |
+          v
+CONFIDENTIAL / TRADITIONAL POOL SEPARATION
+          |
+          v
+CANARY + MAINTENANCE + DCGM + SECURITY GATES
 ```
-
-## Security bulletin gate
-
-NVIDIA began publishing PSIRT security bulletins on GitHub in human-readable and machine-readable formats. `scripts/check_nvidia_security.py` compares the reviewed baseline commit with current `NVIDIA/product-security` main, downloads changed Markdown bulletins, and fails if they mention managed NVIDIA fleet components. The gate fails closed if the explicit DCGM Exporter security check cannot establish a safe version/source state.
-
-## Release provenance
-
-The tag-release workflow:
-
-1. builds the normalized source archive twice;
-2. requires identical SHA-256 manifests;
-3. generates an SPDX JSON SBOM with Syft/Anchore;
-4. creates GitHub/Sigstore build provenance;
-5. creates a signed SBOM attestation bound to the release archive;
-6. publishes only after those gates complete.
-
-GitHub artifact attestations provide SLSA v1.0 Build Level 2 provenance; stronger Build Level 3 isolation can be a future reusable-workflow hardening step.
 
 ## Safety invariants
 
-1. No fleet rollout advances with failed node qualification, DCGM burn-in, security gate, or quarantined nodes.
-2. Drain/quarantine operations require explicit `--yes`; recovery is separate and explicit.
-3. Kubernetes evictions use normal `kubectl drain` semantics rather than force-deleting arbitrary workloads.
-4. New NVIDIA security bulletins relevant to managed components block automated rollout until reviewed.
-5. A PSIRT baseline is never advanced automatically by the same workflow that evaluates it.
-6. Release artifacts must remain reproducible before provenance/SBOM attestation.
-7. Host-level v0.1-v0.5 safety invariants remain in force.
+1. `GPUCluster` and `ClusterPolicy` coexistence is invalid.
+2. Alpha DRA features are surfaced explicitly and never treated as GA by the planner.
+3. NVSwitch systems are not considered fabric-healthy when Fabric Manager is inactive.
+4. Confidential `vm-passthrough` pools are kept logically separate from traditional GPU workload pools.
+5. Admission policy generation is fail-closed and protects quarantine state; applying it remains an operator action.
+6. Topology-domain generation is deterministic and non-mutating.
+7. All v0.1-v0.6 rollback, security, diagnostic and release-provenance invariants remain in force.
 
 ## Development
 
