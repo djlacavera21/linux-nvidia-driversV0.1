@@ -8,6 +8,8 @@ from nvlx.healthz_v15 import evaluate
 from nvlx.finalizer import decide as finalize
 from nvlx.generation_v153 import evaluate as generation
 from nvlx.status_write_v153 import changed as status_changed
+from nvlx.event_dedupe_v154 import fingerprint as event_fingerprint
+from nvlx.shutdown_v154 import evaluate as shutdown
 
 class V15Tests(unittest.TestCase):
     def test_watch_relist(self): self.assertEqual(decide("ERROR","10").action,"relist")
@@ -23,6 +25,9 @@ class V15Tests(unittest.TestCase):
     def test_queue_rejects_invalid_bounds(self):
         with self.assertRaises(ValueError): retry(0,base_seconds=0)
         with self.assertRaises(ValueError): retry(0,base_seconds=5,max_seconds=4)
+    def test_retry_jitter_is_deterministic_and_bounded(self):
+        a=retry(3,jitter_key="event-a"); b=retry(3,jitter_key="event-a")
+        self.assertEqual(a.delay_seconds,b.delay_seconds); self.assertGreaterEqual(a.delay_seconds,16); self.assertLessEqual(a.delay_seconds,20)
     def test_ownership(self):
         ok,denied=validate(["status.phase","spec.driver.version"]); self.assertFalse(ok); self.assertEqual(denied,("spec.driver.version",))
     def test_malformed_ownership_path_denied(self):
@@ -35,6 +40,10 @@ class V15Tests(unittest.TestCase):
     def test_operator_discards_stale_generation(self):
         r=plan("prod",event_type="MODIFIED",resource_version="12",generation=3,latest_generation=4,allowed=True,runtime_action="execute")
         self.assertEqual(r.action,"discard-stale"); self.assertIsNone(r.patch)
+    def test_duplicate_watch_event_is_noop(self):
+        fp=event_fingerprint(event_type="MODIFIED",resource_version="12",generation=3)
+        r=plan("prod",event_type="MODIFIED",resource_version="12",generation=3,allowed=True,runtime_action="execute",previous_event_fingerprint=fp)
+        self.assertEqual(r.action,"event-noop"); self.assertIsNone(r.patch)
     def test_status_write_is_idempotent(self):
         status={"phase":"Ready","event":{"eventTime":"now"},"conditions":[{"type":"Ready","lastTransitionTime":"now"}]}
         first,fp=status_changed(status,None); second,fp2=status_changed(status,fp)
@@ -57,6 +66,12 @@ class V15Tests(unittest.TestCase):
     def test_finalizer_absent_is_complete(self):
         r=finalize(deleting=True,rollback_pending=False,quarantined_nodes=0,active_execution=False,finalizer_present=False)
         self.assertEqual(r.action,"complete"); self.assertFalse(r.remove_finalizer)
+    def test_finalizer_waits_for_status_write(self):
+        r=finalize(deleting=True,rollback_pending=False,quarantined_nodes=0,active_execution=False,status_write_pending=True)
+        self.assertEqual(r.action,"hold"); self.assertFalse(r.remove_finalizer)
+    def test_shutdown_drains_active_mutation(self):
+        r=shutdown(terminating=True,active_mutation=True); self.assertEqual(r.action,"drain"); self.assertFalse(r.ready); self.assertFalse(r.accepting_work)
+    def test_shutdown_exits_when_drained(self): self.assertEqual(shutdown(terminating=True,active_mutation=False).action,"exit")
     def test_health(self):
         self.assertTrue(evaluate(api_reachable=True,leader=True,inventory_fresh=True).ready)
         self.assertFalse(evaluate(api_reachable=True,leader=False,inventory_fresh=True).ready)
