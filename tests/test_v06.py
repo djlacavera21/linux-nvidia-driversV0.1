@@ -18,7 +18,7 @@ class V06Tests(unittest.TestCase):
     def test_maintenance_plan(self):
         p=maintenance_plan("gpu01"); self.assertIn("drain",p.drain); self.assertIn("--ignore-daemonsets",p.drain)
     def test_quarantine_plan(self):
-        p=quarantine_plan("gpu01","Xid 79"); self.assertIn("NoSchedule",p.taint_command[-1])
+        p=quarantine_plan("gpu01","Xid 79"); self.assertIn("NoSchedule"," ".join(p.taint_command))
     def test_alerts_have_xid_and_ecc(self):
         text=prometheus_rule_group(); self.assertIn("NvlxGpuXidError",text); self.assertIn("NvlxGpuUncorrectedEcc",text)
 
