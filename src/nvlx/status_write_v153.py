@@ -2,7 +2,10 @@
 from __future__ import annotations
 import hashlib, json
 
-_DROP_KEYS={"lastTransitionTime","eventTime","deprecatedLastTimestamp","deprecatedFirstTimestamp"}
+_DROP_KEYS={
+    "lastTransitionTime","eventTime","deprecatedLastTimestamp","deprecatedFirstTimestamp",
+    "last_transition_time","event_time","deprecated_last_timestamp","deprecated_first_timestamp",
+}
 
 def _stable(value):
     if isinstance(value,dict):
