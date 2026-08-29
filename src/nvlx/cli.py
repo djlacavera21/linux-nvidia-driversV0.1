@@ -39,14 +39,14 @@ def cmd_plan(_: argparse.Namespace) -> int:
     arch = platform.machine()
     arch_ok = arch in config.architectures
 
-    print(f"Driver release:       {config.version}")
-    print(f"Upstream source:      {config.upstream_repo}")
-    print(f"Host architecture:    {arch}")
-    print(f"Architecture support: {'yes' if arch_ok else 'no'}")
-    print(f"Open-module GPU floor:{' ' if config.open_module_gpu_floor else ''}{config.open_module_gpu_floor}")
-    print(f"Detected NVIDIA PCI:  {len(snapshot['nvidia_devices'])}")
-    print("GPU eligibility:      verify the detected PCI ID against the pinned upstream supported-GPU list")
-    print("Userspace requirement:install matching NVIDIA user-space/GSP components from the same release")
+    print(f"Driver release:        {config.version}")
+    print(f"Upstream source:       {config.upstream_repo}")
+    print(f"Host architecture:     {arch}")
+    print(f"Architecture support:  {'yes' if arch_ok else 'no'}")
+    print(f"Open-module GPU floor: {config.open_module_gpu_floor}")
+    print(f"Detected NVIDIA PCI:   {len(snapshot['nvidia_devices'])}")
+    print("GPU eligibility:       verify the detected PCI ID against the pinned upstream supported-GPU list")
+    print("Userspace requirement: install matching NVIDIA user-space/GSP components from the same release")
     print()
     doctor_status = _print_checks()
     if not arch_ok:
