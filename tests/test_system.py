@@ -6,7 +6,7 @@ from nvlx.system import detect_nvidia_devices, secure_boot_enabled
 
 
 class DetectNvidiaDevicesTests(unittest.TestCase):
-    def test_filters_non_nvidia_pci_devices(self) -> None:
+    def test_filters_non_nvidia_pci_devices_and_reads_subsystem_ids(self) -> None:
         with TemporaryDirectory() as tmp:
             root = Path(tmp)
             nvidia = root / "0000:01:00.0"
@@ -14,6 +14,8 @@ class DetectNvidiaDevicesTests(unittest.TestCase):
             (nvidia / "vendor").write_text("0x10de\n", encoding="utf-8")
             (nvidia / "device").write_text("0x2684\n", encoding="utf-8")
             (nvidia / "class").write_text("0x030000\n", encoding="utf-8")
+            (nvidia / "subsystem_vendor").write_text("0x1462\n", encoding="utf-8")
+            (nvidia / "subsystem_device").write_text("0x5323\n", encoding="utf-8")
 
             other = root / "0000:00:02.0"
             other.mkdir()
@@ -25,6 +27,8 @@ class DetectNvidiaDevicesTests(unittest.TestCase):
             self.assertEqual(len(devices), 1)
             self.assertEqual(devices[0].address, "0000:01:00.0")
             self.assertEqual(devices[0].device_id, "0x2684")
+            self.assertEqual(devices[0].subsystem_vendor_id, "0x1462")
+            self.assertEqual(devices[0].subsystem_device_id, "0x5323")
 
     def test_missing_sysfs_root_returns_empty_list(self) -> None:
         self.assertEqual(detect_nvidia_devices(Path("/definitely/not/here")), [])
