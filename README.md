@@ -1,83 +1,48 @@
-# Linux NVIDIA Drivers v0.7
+# Linux NVIDIA Drivers v0.8
 
-`nvlx` now treats a GPU fleet as a **resource fabric**, not just a set of driver-managed nodes. v0.7 layers DRA/CDI qualification, NVLink/NVSwitch fabric health, Network Operator/RDMA readiness, capacity-fragmentation reporting, confidential-GPU validation, and fail-closed admission guardrails on top of the v0.6 fleet safety model.
+`nvlx` now extends the v0.7 GPU resource fabric into **workload placement and resilience**. v0.8 adds DRA-native placement claims, ComputeDomain-aware gang plans, GPUDirect/RDMA qualification, MIG/DynamicMIG brokerage, fleet power/thermal policy, checkpoint-aware evacuation plans, and deterministic multi-cluster failover planning.
 
 > [!IMPORTANT]
-> v0.7 remains inspection-first. It does not silently migrate a cluster from Device Plugin to DRA, repartition MIG, rewrite networking, or remove quarantine. Mutating maintenance and quarantine actions retain the explicit confirmation model.
+> v0.8 remains inspection/planning-first for disruptive or alpha functionality. DynamicMIG is not silently enabled, GPU workloads are not assumed transparently checkpointable, and multi-cluster failover does not mutate clusters automatically.
 
-## v0.7 highlights
+## v0.8 highlights
 
-- **DRA/CDI qualification.** `nvlx-fleet dra` identifies `GPUCluster` versus `ClusterPolicy`, rejects coexistence, counts ComputeDomains, and surfaces enabled alpha DRA features.
-- **Fabric health.** `nvlx-fleet fabric` checks `nvidia-smi topo -m`, NVLink edges, NVSwitch presence, and Fabric Manager readiness.
-- **Topology domains.** `fabric-domains` creates deterministic topology-domain assignments for planners/canaries without mutating node labels.
-- **Network Operator/RDMA readiness.** Detects NVIDIA/Mellanox NIC/RDMA labels and checks for a Network Operator `NicClusterPolicy`.
-- **GPU capacity/fragmentation.** Reports allocatable, requested, free GPU capacity and nodes with stranded free capacity.
-- **Confidential GPU readiness.** Validates `vm-passthrough` node separation and Kata runtime availability for confidential-container pools.
-- **Admission guardrails.** Generates a fail-closed Kubernetes `ValidatingAdmissionPolicy` that protects quarantined-node state from generic node updates.
-- **v0.6 retained.** Cluster qualification, guarded drain/uncordon, ClusterPolicy validation, DCGM burn-in, quarantine, Prometheus rules, canary waves, PSIRT gating, SBOM and provenance remain intact.
+- **DRA-native workload placement.** `nvlx-fleet placement` generates `ResourceClaim` plans using `gpu.nvidia.com`, optional product/memory selectors, and ComputeDomain intent.
+- **ComputeDomain-aware gang scheduling.** `nvlx-fleet gang` plans all-or-nothing or bounded-minimum replica groups and explicitly accounts for the fact that Kubernetes DRA resources do not support preemption.
+- **RDMA / GPUDirect qualification.** `nvlx-fleet gpudirect` checks RDMA tooling and NVIDIA peer-memory/DMA-BUF readiness and keeps Network Operator requirements visible.
+- **MIG / DynamicMIG brokerage.** `nvlx-fleet mig-broker` validates profile demand and rejects known DynamicMIG feature-gate conflicts before any production geometry change.
+- **Power / thermal fleet policy.** `nvlx-fleet power-policy` validates watt/temperature thresholds and the intended alert/drain/quarantine response.
+- **Checkpoint / evacuation planning.** `nvlx-fleet evacuate-plan` defaults to application checkpoints and renders cordon/inventory/drain actions without pretending transparent CUDA checkpointing exists.
+- **Multi-cluster federation / DR.** `nvlx-fleet federation-plan` deterministically ranks healthy failover clusters by available GPU capacity and rejects insufficient DR capacity.
 
-## Current NVIDIA ecosystem assumptions
+## NVIDIA assumptions
 
-The driver baseline remains **610.57.04** and GPU Operator planning targets **v26.7.0**. GPU Operator 26.7 documents DRA Driver v0.5.0 as an alternative to the Device Plugin path: a cluster can have `GPUCluster` or `ClusterPolicy`, but not both. Full GPU/existing MIG allocation and ComputeDomains are GA; DynamicMIG, MPS, NVML health checks, passthrough and time-slicing DRA feature gates remain alpha and are surfaced by v0.7 rather than silently accepted.
+GPU Operator 26.7 manages DRA Driver v0.5.0 through `GPUCluster`. Full GPU/existing MIG allocation and ComputeDomains are GA, while DynamicMIG remains alpha. DynamicMIG conflicts with `PassthroughSupport`, `NVMLDeviceHealthCheck`, and `MPSSupport`, so v0.8 blocks those combinations in the broker.
 
-GPU Operator uses CDI by default starting with v25.10.0. v0.7 therefore treats CDI/DRA state as first-class fleet metadata rather than assuming the legacy runtime-class model.
+GPUDirect RDMA remains a joint GPU Operator + Network Operator capability. v0.8 therefore treats NIC/RDMA qualification as part of placement readiness instead of assuming GPU health alone implies high-speed fabric readiness.
 
 ## New commands
 
 ```bash
-# resource API and topology
-nvlx-fleet dra
-nvlx-fleet fabric
-nvlx-fleet fabric-domains gpu01 gpu02 gpu03 gpu04 --size 2
-
-# network and capacity
-nvlx-fleet network
-nvlx-fleet capacity
-
-# confidential GPU pool readiness
-nvlx-fleet confidential
-
-# generate fail-closed quarantine admission guardrail
-nvlx-fleet admission-policy > nvlx-gpu-safety.json
-```
-
-## Resource-fabric model
-
-```text
-KUBERNETES NODE INVENTORY
-          |
-          v
-GPU OPERATOR + DRA/CDI MODE
-          |
-          +---- GPUCluster + ClusterPolicy ----> STOP
-          |
-          v
-GPU / NVLINK / NVSWITCH FABRIC
-          |
-          +---- unhealthy FM/fabric -----------> QUARANTINE / STOP
-          |
-          v
-NETWORK OPERATOR + RDMA READINESS
-          |
-          v
-CAPACITY + FRAGMENTATION
-          |
-          v
-CONFIDENTIAL / TRADITIONAL POOL SEPARATION
-          |
-          v
-CANARY + MAINTENANCE + DCGM + SECURITY GATES
+nvlx-fleet placement --count 8 --product H100 --min-memory-gib 80 --compute-domain rack-a
+nvlx-fleet gang --replicas 4 --gpus-per-replica 8 --compute-domain rack-a
+nvlx-fleet gpudirect
+nvlx-fleet mig-broker --profile 1g.10gb --replicas 8 --dynamic
+nvlx-fleet power-policy --max-watts 700 --max-temp-c 85 --action drain
+nvlx-fleet evacuate-plan gpu01 --checkpoint-mode application
+nvlx-fleet federation-plan --primary east --required-gpus 8 east:us-east:8 west:us-west:16
 ```
 
 ## Safety invariants
 
-1. `GPUCluster` and `ClusterPolicy` coexistence is invalid.
-2. Alpha DRA features are surfaced explicitly and never treated as GA by the planner.
-3. NVSwitch systems are not considered fabric-healthy when Fabric Manager is inactive.
-4. Confidential `vm-passthrough` pools are kept logically separate from traditional GPU workload pools.
-5. Admission policy generation is fail-closed and protects quarantine state; applying it remains an operator action.
-6. Topology-domain generation is deterministic and non-mutating.
-7. All v0.1-v0.6 rollback, security, diagnostic and release-provenance invariants remain in force.
+1. DRA placement is generated as a claim plan; cluster mutation remains explicit.
+2. Gang plans never assume DRA preemption is available.
+3. DynamicMIG is treated as alpha and conflicting feature gates are rejected before rollout.
+4. GPUDirect qualification requires both GPU-side and RDMA/network evidence.
+5. Power and thermal policy never silently changes clocks or power limits; it defines fleet responses.
+6. Evacuation defaults to application-level checkpointing and never claims transparent CUDA state restoration.
+7. Federation failover requires independently healthy capacity; no cluster is promoted merely because it is reachable.
+8. All v0.1-v0.7 rollback, security, quarantine, PSIRT, reproducibility, SBOM, and provenance gates remain in force.
 
 ## Development
 
@@ -87,7 +52,3 @@ python3 -m venv .venv
 python -m pip install -e .
 python -m unittest discover -s tests -v
 ```
-
-## License
-
-Project-authored orchestration code is MIT licensed. NVIDIA source, firmware, user-space components, trademarks, and redistributable packages remain subject to their respective NVIDIA licenses.

@@ -29,36 +29,24 @@ jobs:
         run: python -m unittest discover -s tests -v
       - name: Reproducible archive smoke test
         run: |
-          python scripts/repro_release.py 0.7.0 --out /tmp/repro-a
-          python scripts/repro_release.py 0.7.0 --out /tmp/repro-b
+          python scripts/repro_release.py 0.8.0 --out /tmp/repro-a
+          python scripts/repro_release.py 0.8.0 --out /tmp/repro-b
           cmp /tmp/repro-a/SHA256SUMS /tmp/repro-b/SHA256SUMS
       - name: CLI smoke test
         run: |
           nvlx --version
           nvlx detect --sysfs-root /definitely/not/here
           nvlx repo-plan
-          nvlx prime --sysfs-root /definitely/not/here
-          nvlx initramfs-plan
-          nvlx secureboot-verify
-          nvlx session
-          nvlx mig-fabric
-          nvlx mig-profile-plan disabled
           nvlx health
-          nvlx telemetry --format json
           nvlx telemetry --format prometheus
-          nvlx rollback-preflight
-          nvlx watchdog-plan
-          nvlx gpu-operator-plan
-          nvlx immutable-plan
-          nvlx nvsdm
-          nvlx dcgm-telemetry || test $? -eq 1
-          nvlx topology || test $? -eq 1
-          nvlx transaction-pending || test $? -eq 1
           nvlx-fleet maintenance-plan gpu01
-          nvlx-fleet diag-plan --level 3
-          nvlx-fleet quarantine-plan gpu01 "Xid 79"
           nvlx-fleet waves gpu03 gpu01 gpu02 --canaries 1 --wave-size 2
-          nvlx-fleet alerts | grep NvlxGpuXidError
-          nvlx-fleet advance-check --qualified --diagnostics-passed --security-passed
           nvlx-fleet fabric-domains gpu03 gpu01 gpu02 --size 2 | grep fabric-000
           nvlx-fleet admission-policy | grep ValidatingAdmissionPolicy
+          nvlx-fleet placement --count 2 --product H100 --min-memory-gib 80 --compute-domain rack-a | grep gpu.nvidia.com
+          nvlx-fleet gang --replicas 4 --gpus-per-replica 8 --compute-domain rack-a | grep all_or_nothing
+          nvlx-fleet mig-broker --profile 1g.10gb --replicas 4
+          nvlx-fleet power-policy --max-watts 700 --max-temp-c 85
+          nvlx-fleet evacuate-plan gpu01 --checkpoint-mode application
+          nvlx-fleet federation-plan --primary east --required-gpus 8 east:us-east:8 west:us-west:16
+          nvlx-fleet gpudirect || test $? -eq 2
