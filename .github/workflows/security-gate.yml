@@ -1,0 +1,23 @@
+name: NVIDIA security gate
+
+on:
+  pull_request:
+    branches: [main]
+  schedule:
+    - cron: '41 12 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  gate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - run: python -m pip install -e .
+      - name: Gate managed DCGM Exporter against NVIDIA PSIRT bulletin
+        run: nvlx-fleet security-gate --dcgm-exporter-version 4.8.3
