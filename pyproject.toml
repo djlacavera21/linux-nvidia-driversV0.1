@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "nvlx"
-version = "0.7.0"
-description = "NVIDIA GPU resource-fabric, DRA, networking, capacity, confidential-compute, fleet safety and provenance toolkit"
+version = "0.8.0"
+description = "NVIDIA GPU DRA placement, topology-aware scheduling, GPUDirect, MIG brokerage, power policy, evacuation, federation, and fleet safety toolkit"
 readme = "README.md"
 requires-python = ">=3.11"
 license = {text = "MIT"}
