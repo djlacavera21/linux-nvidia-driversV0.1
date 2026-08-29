@@ -1,25 +1,26 @@
-# nvlx: Linux-NVIDIA-Driver v1.5.6
+# nvlx: Linux-NVIDIA-Driver v1.5.7
 
-`nvlx` v1.5.6 is a sixth stabilization patch for the live Kubernetes operator. It hardens the restart boundary by persisting leadership fencing tokens atomically and treating uncertain Lease renewal outcomes as mutation-fencing events rather than assuming leadership remains valid.
+`nvlx` v1.5.7 is a seventh stabilization patch for the live Kubernetes operator. It adds integrity-checked persisted fencing state and rollback-aware startup recovery so a restarted controller cannot regain mutation authority from tampered, stale, or logically regressed Lease state.
 
 > [!IMPORTANT]
-> A persisted token is evidence of previously observed authority, not authority by itself. After restart it must still match the current Lease holder, fencing epoch and Lease `resourceVersion`, and the Lease must still be fresh before controller-owned mutation is allowed.
+> Persisted fencing state remains evidence only. A restored token must pass file-integrity verification and then match the live Lease holder, fencing epoch, Lease `resourceVersion`, and freshness before controller-owned mutation is allowed.
 
-## v1.5.6 fixes
+## v1.5.7 fixes
 
-- **Restart-safe fencing store.** Fence tokens are written through a temporary file, flushed with `fsync`, and atomically replaced.
-- **Fail-closed reload.** Missing state yields no token; malformed schema or invalid token values are rejected rather than silently accepted.
-- **Post-restart revalidation.** Restored tokens are rechecked against current Lease holder, epoch, resourceVersion and freshness before mutation.
-- **Lease renewal race handling.** `409`/`412` or observed resourceVersion changes force relist + fence; `404` loses leadership; `429` and 5xx outcomes remain retryable but mutation authority is fenced while renewal is uncertain.
-- **Handoff preservation.** Existing stale-leader fencing, fence-drain and standby semantics remain active through restart and renewal races.
-- **Regression coverage.** Tests cover persisted-token reload, stale persisted tokens after handoff, corrupt state, renewal conflicts, uncertain renewals and successful renewal.
-- **1.5.5 retained.** Exact Lease fencing tokens, duplicate-event suppression, bounded jitter, ordered finalization, stale-generation guards and status-write idempotency remain active.
+- **Integrity envelope.** Newly persisted fence tokens are wrapped in a versioned SHA-256 integrity envelope and verified before reload.
+- **Durability tightening.** Fence-state replacement now also `fsync`s the containing directory after atomic replacement.
+- **Legacy compatibility.** Existing v1.5.6 token files remain readable, but newly written state uses the integrity envelope.
+- **Tamper detection.** A modified token whose integrity digest no longer matches fails closed instead of being accepted at startup.
+- **Rollback-aware recovery.** Startup distinguishes exact restoration, older persisted epochs that require reacquisition, and a live Lease epoch lower than persisted state, which is surfaced as `rollback-detected`.
+- **Live revalidation.** Even integrity-valid persisted state must exactly match current Lease holder/epoch/resourceVersion/freshness before mutation authority is restored.
+- **Regression coverage.** Tests cover tampered envelopes, legacy state, exact restore, newer-epoch reacquisition, missing state, and epoch rollback detection.
+- **1.5.6 retained.** Atomic persistence, renewal-race fencing, stale-leader blocking, fence-drain behavior, duplicate-event suppression, bounded jitter, ordered finalization, and status-write idempotency remain active.
 
 ## Safety invariants
 
-1. Persisted fencing state cannot authorize mutation without live Lease revalidation.
-2. Corrupt persisted fencing state fails closed.
-3. A token restored after another controller took leadership is rejected.
-4. Lease renewal uncertainty removes mutation authority until leadership is re-established.
-5. Concurrent Lease updates force relist/revalidation instead of continuing with stale authority.
-6. All v0.1-v1.5.5 approval, rollback, Secure Boot, DRA, fabric, health/SLO, PSIRT, quarantine, audit, SBOM and provenance safeguards remain in force.
+1. Integrity-valid persisted state still cannot authorize mutation without live Lease revalidation.
+2. Tampered or malformed persisted fencing state fails closed.
+3. A newer live leadership epoch invalidates an older persisted token and forces reacquisition.
+4. A live leadership epoch lower than the persisted epoch is treated as a rollback condition, not silently accepted.
+5. Directory metadata is flushed after atomic fence-state replacement to tighten crash durability.
+6. All v0.1-v1.5.6 approval, rollback, Secure Boot, DRA, fabric, health/SLO, PSIRT, quarantine, audit, SBOM and provenance safeguards remain in force.
