@@ -19,5 +19,7 @@ jobs:
         with:
           python-version: '3.13'
       - run: python -m pip install -e .
-      - name: Gate managed DCGM Exporter against NVIDIA PSIRT bulletin
+      - name: Detect new relevant NVIDIA PSIRT bulletins
+        run: python scripts/check_nvidia_security.py
+      - name: Gate managed DCGM Exporter minimum fixed version
         run: nvlx-fleet security-gate --dcgm-exporter-version 4.8.3
