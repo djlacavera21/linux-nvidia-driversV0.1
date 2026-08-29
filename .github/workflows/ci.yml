@@ -29,8 +29,8 @@ jobs:
         run: python -m unittest discover -s tests -v
       - name: Reproducible archive smoke test
         run: |
-          python scripts/repro_release.py 0.5.0 --out /tmp/repro-a
-          python scripts/repro_release.py 0.5.0 --out /tmp/repro-b
+          python scripts/repro_release.py 0.6.0 --out /tmp/repro-a
+          python scripts/repro_release.py 0.6.0 --out /tmp/repro-b
           cmp /tmp/repro-a/SHA256SUMS /tmp/repro-b/SHA256SUMS
       - name: CLI smoke test
         run: |
@@ -54,3 +54,9 @@ jobs:
           nvlx dcgm-telemetry || test $? -eq 1
           nvlx topology || test $? -eq 1
           nvlx transaction-pending || test $? -eq 1
+          nvlx-fleet maintenance-plan gpu01
+          nvlx-fleet diag-plan --level 3
+          nvlx-fleet quarantine-plan gpu01 "Xid 79"
+          nvlx-fleet waves gpu03 gpu01 gpu02 --canaries 1 --wave-size 2
+          nvlx-fleet alerts | grep NvlxGpuXidError
+          nvlx-fleet advance-check --qualified --diagnostics-passed --security-passed
