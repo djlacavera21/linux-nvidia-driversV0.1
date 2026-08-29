@@ -8,8 +8,7 @@ class SecurityFinding:
     source:str; cves:tuple[str,...]; severity:str; blocked:bool; reason:str
     def to_dict(self): return asdict(self)
 
-# Current official NVIDIA bulletin relevant to the v0.6 managed stack.
-DEFAULT_BULLETINS=("https://nvidia.custhelp.com/app/answers/detail/a_id/5857",)
+DEFAULT_BULLETINS=("https://raw.githubusercontent.com/NVIDIA/product-security/main/2026/5857/5857.md",)
 
 def _version_tuple(value:str)->tuple[int,...]:
     return tuple(int(x) for x in re.findall(r"\d+",value)[:4])
@@ -22,7 +21,8 @@ def evaluate_dcgm_exporter(version:str|None, *, threshold:str="4.8.2")->Security
 
 def bulletin_reachable(url:str)->bool:
     try:
-        with urllib.request.urlopen(url,timeout=5) as r: return 200 <= getattr(r,"status",200) < 400
+        req=urllib.request.Request(url,headers={"User-Agent":"nvlx-security-gate"})
+        with urllib.request.urlopen(req,timeout=5) as r: return 200 <= getattr(r,"status",200) < 400
     except Exception: return False
 
 def gate(dcgm_exporter_version:str|None, *, fail_closed:bool=True)->dict[str,object]:
@@ -30,5 +30,5 @@ def gate(dcgm_exporter_version:str|None, *, fail_closed:bool=True)->dict[str,obj
     reachable=all(bulletin_reachable(u) for u in DEFAULT_BULLETINS)
     blocked=finding.blocked or (fail_closed and not reachable)
     reasons=[finding.reason]
-    if not reachable: reasons.append("NVIDIA bulletin source unavailable")
+    if not reachable: reasons.append("NVIDIA product-security source unavailable")
     return {"passed":not blocked,"sources":DEFAULT_BULLETINS,"findings":[finding.to_dict()],"reasons":reasons}
