@@ -1,64 +1,90 @@
-# nvlx: Linux-NVIDIA-Driver v1.2
+# nvlx: Linux-NVIDIA-Driver v1.3
 
-`nvlx` v1.2 adds an **operations-control layer** above the 1.1 production controller. The goal is bounded blast radius: detect drift, freeze the facts used for approval, honor maintenance windows, prevent duplicate executions, cap concurrent disruption, trip a fleet circuit breaker, and choose recovery deterministically.
+`nvlx` v1.3 integrates the 1.2 operations safeguards directly into the production reconciliation runtime. The controller now makes one deterministic execution decision across leadership, approval, maintenance window, fresh preflight facts, idempotency, rollout disruption budget, and fleet circuit state before disruptive work can proceed.
 
 > [!IMPORTANT]
-> v1.2 does not make disruptive GPU changes autonomous. Existing plan fingerprints, approvals, leader election, compatibility, rollback, health, SLO, PSIRT and quarantine gates remain mandatory.
+> v1.3 does not bypass operator control. Emergency maintenance-window override does not bypass approval, leader election, compatibility, health/SLO, PSIRT, quarantine, rollback, or audit requirements.
 
-## v1.2 operations controls
+## v1.3 runtime integration
 
-- **Change windows.** UTC maintenance windows gate disruptive work; emergency override is explicit and visible.
-- **Circuit breaker.** Repeated failures stop fleet progression; a security-gate failure opens the breaker immediately.
-- **Execution idempotency.** Deterministic execution keys prevent replaying the same plan/target/generation after completion.
-- **Rollout budgets.** Concurrent unavailable GPU nodes are capped before another rollout slot is granted.
-- **Desired-state drift.** Driver, GPU Operator, MIG, DRA, Fabric Manager and Network Operator drift is classified as disruptive and requires approval.
-- **Preflight snapshots.** Approval-time facts are fingerprinted and can be revalidated immediately before execution so stale approvals do not act on changed fleet conditions.
-- **Deterministic recovery.** A verified first-failure rollback may be automatic; repeated failures, uncertain state and security failures fail closed to operator review/quarantine.
-- **1.1 retained.** Approval TTL/revocation, tamper-evident audit chains, state migrations, leader-aware reconciliation, metrics, execution records and Kubernetes HA/RBAC remain active.
+- **Integrated runtime gate stack.** `runtime-evaluate` combines the 1.2 controls into one fail-closed execution decision.
+- **Persistent guard state.** Circuit failure count, completed execution keys, and last successful generation are atomically persisted with a versioned runtime-state contract.
+- **Progressive canaries.** `canary-check` advances waves only when health, diagnostics, security, quarantine, and circuit state all permit promotion.
+- **Rollback orchestration.** `rollback-plan` composes package/module restore, depmod, initramfs refresh, boot validation, and health/SLO/security revalidation without claiming unsafe live module swaps.
+- **Kubernetes maintenance policy.** `maintenance-policy` renders a namespaced ConfigMap with UTC maintenance-window controls and explicit emergency override state.
+- **Expanded observability.** Controller Prometheus output now includes circuit state, rollout slots, completed executions, stale-preflight count, and canary wave.
+- **Idempotency CLI.** Deterministic plan/target/generation execution keys are first-class controller output.
+- **1.2 retained.** Change windows, drift classification, preflight snapshots, rollout budgets, circuit breakers, deterministic recovery, and all earlier safety contracts remain active.
 
-## Production execution model
+## Runtime model
 
 ```text
-OBSERVE DESIRED + ACTUAL STATE
-          |
-          v
-       DRIFT?
-          | no -> NOOP
-          v
-PREFLIGHT SNAPSHOT + COMPATIBILITY
-          |
-          v
-PLAN + FINGERPRINT + APPROVAL
-          |
-          v
-CHANGE WINDOW + LEADER + FRESH PREFLIGHT
-          |
-          v
+DESIRED STATE / DRIFT
+        |
+        v
+PREFLIGHT + COMPATIBILITY + PLAN
+        |
+        v
+APPROVAL + LEADER LEASE
+        |
+        v
+MAINTENANCE WINDOW
+        |
+        v
+FRESH PREFLIGHT FACTS
+        |
+        v
 IDEMPOTENCY + ROLLOUT BUDGET + CIRCUIT BREAKER
-          |\
-          | fail -> HOLD / QUARANTINE
-          v
-       EXECUTE
-          |
-          v
-HEALTH / SLO / SECURITY VALIDATION
-          |\
-          | fail -> DETERMINISTIC RECOVERY
-          v
-        AUDIT
+        |\
+        | blocked -> HOLD / QUARANTINE + AUDIT
+        v
+CANARY EXECUTION
+        |
+        v
+HEALTH + DIAGNOSTICS + SLO + SECURITY
+        |\
+        | fail -> ROLLBACK ORCHESTRATION
+        v
+PROMOTE NEXT WAVE
+```
+
+## Controller commands
+
+```bash
+# deterministic execution identity
+nvlx-controller idempotency-key <plan-fingerprint> gpu01 2
+
+# integrated runtime decision
+nvlx-controller runtime-evaluate facts.json \
+  --leader --approval-valid \
+  --execution-key exec-... \
+  --total-nodes 20
+
+# persistent guard state
+nvlx-controller runtime-state /var/lib/nvlx/runtime.json --record-failure
+nvlx-controller runtime-state /var/lib/nvlx/runtime.json --record-success exec-... --generation 2
+
+# progressive canary promotion
+nvlx-controller canary-check \
+  --current-wave 0 --total-waves 3 \
+  --healthy-fraction 1.0 \
+  --diagnostics-passed --security-passed
+
+# rollback and maintenance policy
+nvlx-controller rollback-plan --rollback-available --failure-count 1
+nvlx-controller maintenance-policy --start-hour 2 --end-hour 5
 ```
 
 ## Safety invariants
 
-1. Security failures open the circuit breaker immediately.
-2. Stale preflight facts invalidate execution eligibility.
-3. Completed idempotency keys cannot be executed twice.
-4. Rollout disruption cannot exceed the configured unavailable-node budget.
-5. Disruptive desired-state drift requires approval.
-6. Automatic rollback is limited to a bounded first failure with verified rollback availability.
-7. Uncertain observed state fails closed.
-8. Emergency change-window override is explicit; it does not bypass security, approval, leader, compatibility, health or rollback gates.
-9. All v0.1-v1.1 safety invariants remain in force.
+1. Integrated runtime execution is denied if any required gate fails.
+2. Security failure opens the circuit path to quarantine rather than ordinary continuation.
+3. Completed execution keys are replay-protected across controller restarts when runtime state is persisted.
+4. Canary promotion requires health, diagnostics, security, quarantine, and circuit gates to pass together.
+5. Automatic rollback remains limited to a verified bounded first failure.
+6. Maintenance emergency override affects only the time window; it does not bypass any other production gate.
+7. Runtime-state writes are atomic and future/unknown state versions fail closed.
+8. All v0.1-v1.2 rollback, Secure Boot, DRA, fabric, policy, SLO, PSIRT, audit, SBOM and provenance safeguards remain in force.
 
 ## Development
 

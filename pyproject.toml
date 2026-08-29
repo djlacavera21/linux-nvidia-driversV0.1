@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "nvlx"
-version = "1.2.0"
-description = "Production NVIDIA GPU fleet controller with change windows, circuit breakers, idempotency, rollout budgets, drift detection, preflight snapshots, and deterministic recovery policy"
+version = "1.3.0"
+description = "Production NVIDIA GPU fleet controller with integrated runtime gates, persistent circuit/idempotency state, canary promotion, rollback orchestration, maintenance policy, and expanded observability"
 readme = "README.md"
 requires-python = ">=3.11"
 license = {text = "MIT"}
