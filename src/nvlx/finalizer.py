@@ -11,6 +11,8 @@ class FinalizerDecision:
     def to_dict(self): return asdict(self)
 
 def decide(*, deleting: bool, rollback_pending: bool, quarantined_nodes: int, active_execution: bool) -> FinalizerDecision:
+    if quarantined_nodes < 0:
+        raise ValueError("quarantined_nodes must be >= 0")
     if not deleting: return FinalizerDecision("retain",False,("resource not deleting",))
     reasons=[]
     if rollback_pending: reasons.append("rollback pending")

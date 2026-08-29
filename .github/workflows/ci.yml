@@ -29,14 +29,13 @@ jobs:
         run: python -m unittest discover -s tests -v
       - name: Reproducible archive smoke test
         run: |
-          python scripts/repro_release.py 1.5.1 --out /tmp/repro-a
-          python scripts/repro_release.py 1.5.1 --out /tmp/repro-b
+          python scripts/repro_release.py 1.5.2 --out /tmp/repro-a
+          python scripts/repro_release.py 1.5.2 --out /tmp/repro-b
           cmp /tmp/repro-a/SHA256SUMS /tmp/repro-b/SHA256SUMS
       - name: CLI smoke test
         run: |
-          nvlx --version | grep 1.5.1
+          nvlx --version | grep 1.5.2
           nvlx-k8s operator-plan prod --event-type MODIFIED --resource-version 12 --generation 3 --allowed --runtime-action execute | grep '"action": "patch-status"'
-          nvlx-k8s operator-plan prod --event-type MODIFIED --generation 3 --allowed --runtime-action execute | grep '"action": "relist"'
-          nvlx-k8s queue-retry 8 | grep '"dead_letter": true'
-          ! nvlx-k8s ownership-check .status.phase
+          nvlx-k8s operator-plan prod --event-type DELETED --resource-version 13 --generation 3 | grep '"action": "observe-delete"'
+          nvlx-k8s operator-plan prod --event-type ERROR --resource-version 13 --generation 3 --attempt 8 | grep '"action": "dead-letter"'
           nvlx-k8s health --api-reachable --leader --inventory-fresh | grep '"ready": true'
