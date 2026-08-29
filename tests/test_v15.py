@@ -9,13 +9,22 @@ from nvlx.healthz_v15 import evaluate
 class V15Tests(unittest.TestCase):
     def test_watch_relist(self): self.assertEqual(decide("ERROR","10").action,"relist")
     def test_bookmark(self): self.assertEqual(decide("BOOKMARK","11").action,"checkpoint")
+    def test_empty_cursor_relists(self): self.assertEqual(decide("MODIFIED"," ").action,"relist")
     def test_patch_requires_rv(self): self.assertFalse(patch("").valid)
-    def test_queue_deadletters(self): self.assertTrue(retry(8).dead_letter)
+    def test_queue_deadletters(self):
+        r=retry(8); self.assertTrue(r.dead_letter); self.assertEqual(r.reason,"retry budget exhausted")
+    def test_queue_rejects_invalid_bounds(self):
+        with self.assertRaises(ValueError): retry(0,base_seconds=0)
+        with self.assertRaises(ValueError): retry(0,base_seconds=5,max_seconds=4)
     def test_ownership(self):
         ok,denied=validate(["status.phase","spec.driver.version"]); self.assertFalse(ok); self.assertEqual(denied,("spec.driver.version",))
+    def test_malformed_ownership_path_denied(self):
+        ok,denied=validate([".status.phase","status..phase","status.conditions[0]"]); self.assertFalse(ok); self.assertEqual(len(denied),3)
     def test_operator_status_patch(self):
         r=plan("prod",event_type="MODIFIED",resource_version="12",generation=3,allowed=True,runtime_action="execute")
         self.assertEqual(r.action,"patch-status"); self.assertEqual(r.patch["resource_version"],"12")
+    def test_operator_missing_cursor_relists(self):
+        self.assertEqual(plan("prod",event_type="MODIFIED",resource_version="",generation=3,allowed=True,runtime_action="execute").action,"relist")
     def test_operator_relist(self): self.assertEqual(plan("prod",event_type="ERROR",resource_version="12",generation=3,allowed=False,runtime_action="hold").action,"relist")
     def test_health(self):
         self.assertTrue(evaluate(api_reachable=True,leader=True,inventory_fresh=True).ready)
