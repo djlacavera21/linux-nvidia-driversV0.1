@@ -1,115 +1,123 @@
-# Linux NVIDIA Drivers v0.5
+# Linux NVIDIA Drivers v0.6
 
-`nvlx` is a Linux-first NVIDIA driver control plane for transactional upgrades, rollback safety, GPU health, MIG/NVLink/NVSwitch operations, Kubernetes GPU Operator planning, immutable hosts, and reproducible signed releases.
+`nvlx` is a Linux NVIDIA driver safety/control toolkit. v0.6 adds a cluster-aware `nvlx-fleet` surface for qualification, maintenance, diagnostics, quarantine, canary rollout, alerting, security gating, and supply-chain provenance.
 
 > [!IMPORTANT]
-> This project does not redistribute NVIDIA proprietary user-space components. It orchestrates and validates NVIDIA's official Linux driver/open-kernel-module ecosystem.
+> Host driver operations remain explicit and guarded. Cluster mutation is never implicit: drain, quarantine, uncordon, unquarantine, and diagnostic burn-in require deliberate operator actions.
 
-## v0.5 highlights
+## v0.6 highlights
 
-- **Rollback-version availability preflight.** Before a transaction starts, nvlx verifies the captured NVIDIA/CUDA/Fabric/DCGM package versions are still recoverable through APT/DNF repositories, the pacman cache, or the current NixOS generation. Missing rollback artifacts abort the upgrade.
-- **Systemd retry policy.** The boot guard now supports bounded restart attempts, restart delay, validation timeout, and start-limit windows instead of a single one-shot recovery attempt.
-- **Per-GPU ECC + Xid telemetry.** `nvlx dcgm-telemetry` queries volatile corrected/uncorrected ECC counters per GPU, associates current-boot Xid events with PCI bus IDs, and detects DCGM Exporter Xid/ECC Prometheus series.
-- **NVSDM / Blackwell NVSwitch readiness.** `nvlx nvsdm` verifies the driver-major-aligned `libnvsdm-<branch>` package and DCGM NVSwitch discovery. The experimental `nvsdm_cli` is reported but not relied on as a stable interface.
-- **MIG profile lifecycle.** `mig-profile-plan` previews disruptive commands. `mig-profile-apply` requires root, `--maintenance`, `--yes`, confirmed MIG capability, and zero active compute processes.
-- **GPU Operator integration.** `gpu-operator-plan` generates a pinned NVIDIA GPU Operator 26.7 Helm plan using the configured driver release and `none`, `single`, or `mixed` MIG strategy.
-- **Immutable-host support.** `immutable-plan` prevents conventional mutation assumptions on RHCOS/CoreOS/Flatcar/Bottlerocket/Talos/COS-class hosts. RHCOS is identified as the NVIDIA-validated OpenShift path; other immutable systems remain advisory unless NVIDIA/platform validation exists.
-- **Signed reproducible releases.** Tagged releases build a deterministic source archive twice, require matching SHA-256 manifests, create a GitHub provenance attestation using OIDC, and publish the attested artifacts.
-- **Telemetry/report schema expansion.** JSON/Prometheus telemetry and sanitized support bundles now include ECC/Xid, DCGM Exporter, NVSDM, immutable-host, and rollback-preflight state.
+- **Cluster-wide node qualification.** `nvlx-fleet qualify` checks Kubernetes Ready/schedulable state, GPU presence, GPU-driver upgrade labels, and disabled GPU Operator validators.
+- **Maintenance/drain orchestration.** Preview or execute `cordon -> drain`; recovery is a separate explicit `uncordon` command.
+- **GPU Operator ClusterPolicy validation.** Checks that `cluster-policy` exists, reconciles to a ready/success state, DCGM Exporter is enabled, and MIG strategy is recognized.
+- **DCGM diagnostic burn-in.** Plans DCGM diagnostic levels 1-4 and executes them only with `--yes` and a bounded timeout.
+- **GPU/NVSwitch fault quarantine.** Applies an `nvlx.io/quarantined=true` label plus a `NoSchedule` GPU-fault taint; unquarantine is explicit.
+- **Prometheus alert rules.** Generates rules for host health, Xid events, uncorrected ECC, NVSwitch faults, and stale transactions.
+- **Fleet upgrade waves/canaries.** Deterministic canary-first wave planning and a hard advancement gate for node qualification, diagnostics, security posture, and quarantine count.
+- **Automatic NVIDIA PSIRT gating.** A daily/PR workflow diffs NVIDIA's public `product-security` repository from a reviewed baseline. New or changed bulletins mentioning managed GPU-driver/DCGM/GPU Operator/Fabric/NVSDM/NVSwitch/NVOS components fail the gate pending review.
+- **SBOM + SLSA provenance.** Tagged reproducible releases generate an SPDX JSON SBOM, GitHub build-provenance attestation, and signed SBOM attestation after deterministic archive verification.
 
-## Current NVIDIA ecosystem baseline
+## Current ecosystem assumptions
 
-The driver baseline remains **610.57.04** in `config/driver-series.toml`. The current GPU Operator 26.7 component matrix supports driver 610.57.04 and includes DCGM Exporter 4.6.0-4.8.3, DCGM 4.6.0-1, and MIG Manager 0.15.0. NVSDM packages are aligned by driver major, e.g. `libnvsdm-610` for R610.
+The repository driver baseline remains **610.57.04**. GPU Operator planning targets **v26.7.0**. NVIDIA GPU Operator 26.7 manages the Device Plugin `ClusterPolicy` path and includes DCGM/DCGM Exporter/validator components; NVIDIA also documents DRA as a distinct `GPUCluster` path that must not coexist with `ClusterPolicy`.
 
-## Main commands
+The current security baseline pins NVIDIA `product-security` commit `6e8ef1666730b8906a3690505bb9f4311e68c228`. Updating that value is a security-review action, not an automated self-approval.
+
+## Fleet commands
 
 ```bash
-# rollback / transaction safety
-nvlx package-state
-nvlx rollback-preflight
-sudo nvlx install --source ./vendor/open-gpu-kernel-modules --yes
-nvlx transaction-pending
-nvlx watchdog-plan --retries 3 --restart-sec 20 --timeout-sec 90
-sudo nvlx boot-guard-install --yes
-sudo nvlx boot-validate --auto-rollback
+# qualification and policy
+nvlx-fleet qualify
+nvlx-fleet clusterpolicy
 
-# fleet reliability / switching
-nvlx health
-nvlx dcgm-telemetry
-nvlx nvsdm
-nvlx topology
-nvlx mig-fabric
-nvlx telemetry --format prometheus
+# maintenance
+nvlx-fleet maintenance-plan gpu01 --timeout 10m
+sudo -E nvlx-fleet drain gpu01 --timeout 10m --yes
+sudo -E nvlx-fleet uncordon gpu01 --yes
 
-# MIG lifecycle
-nvlx mig-profile-plan 1g.10gb
-sudo nvlx mig-profile-apply 1g.10gb --maintenance --yes
-nvlx mig-profile-plan disabled
+# DCGM burn-in
+nvlx-fleet diag-plan --level 3 --timeout-sec 900
+sudo -E nvlx-fleet diag-run --level 3 --timeout-sec 900 --yes
 
-# Kubernetes / immutable hosts
-nvlx gpu-operator-plan --mig-strategy mixed
-nvlx immutable-plan
+# quarantine
+nvlx-fleet quarantine-plan gpu01 "Xid 79"
+sudo -E nvlx-fleet quarantine gpu01 "Xid 79" --yes
+sudo -E nvlx-fleet unquarantine gpu01 --yes
 
-# graphics / compatibility
-nvlx prime
-nvlx session
-nvlx compat
-nvlx secureboot-verify
+# alert rules
+nvlx-fleet alerts > nvlx-gpu-alerts.yaml
 
-# sanitized support bundle
-nvlx report ./nvlx-report
+# canary/waves
+nvlx-fleet waves gpu01 gpu02 gpu03 gpu04 --canaries 1 --wave-size 2
+nvlx-fleet advance-check --qualified --diagnostics-passed --security-passed
+
+# security
+nvlx-fleet security-gate --dcgm-exporter-version 4.8.3
+python scripts/check_nvidia_security.py
 ```
 
-## Transaction safety model
+## Rollout model
 
 ```text
-PACKAGE SNAPSHOT
-      |
-      v
-ROLLBACK AVAILABILITY PREFLIGHT ---- unavailable ---> ABORT
-      |
-      v
-MODULE SNAPSHOT
-      |
-      v
-INSTALL + DEPMOD
-      |
-      v
-PENDING REBOOT
-      |
-      v
-BOOT GUARD (bounded retry policy)
-      |
-      +---- healthy ---> VALIDATED
-      |
-      +---- failed ----> restore exact packages + modules + initramfs
+DISCOVER GPU NODES
+       |
+       v
+QUALIFY + CLUSTERPOLICY VALIDATION
+       |
+       +---- fail ----> STOP
+       |
+       v
+CANARY WAVE
+       |
+       v
+CORDON + DRAIN
+       |
+       v
+DRIVER / OPERATOR CHANGE
+       |
+       v
+DCGM DIAGNOSTIC BURN-IN
+       |
+       +---- fault ----> QUARANTINE + STOP ADVANCEMENT
+       |
+       v
+SECURITY GATE + HEALTH CHECK
+       |
+       +---- fail ----> STOP
+       |
+       v
+UNCORDON CANARY
+       |
+       v
+ADVANCE NEXT WAVE
 ```
 
-A package manifest alone is not treated as rollback capability. v0.5 requires evidence that the recorded versions can actually be restored before module replacement begins.
+## Security bulletin gate
 
-## MIG safety
+NVIDIA began publishing PSIRT security bulletins on GitHub in human-readable and machine-readable formats. `scripts/check_nvidia_security.py` compares the reviewed baseline commit with current `NVIDIA/product-security` main, downloads changed Markdown bulletins, and fails if they mention managed NVIDIA fleet components. The gate fails closed if the explicit DCGM Exporter security check cannot establish a safe version/source state.
 
-MIG geometry changes can terminate or invalidate GPU workloads. nvlx therefore refuses profile application while compute processes are active and requires both `--maintenance` and `--yes`. The Kubernetes path remains declarative: GPU Operator MIG Manager watches `nvidia.com/mig.config` and handles node/pod coordination independently of the local CLI path.
+## Release provenance
 
-## Immutable hosts
+The tag-release workflow:
 
-Direct source installation is intended for conventional mutable Linux hosts. On immutable/container-optimized systems, nvlx reports a deployment strategy instead of pretending host package mutation is safe. RHCOS should use the OpenShift GPU Operator path; other immutable platforms require their own validated driver/operator mechanism.
+1. builds the normalized source archive twice;
+2. requires identical SHA-256 manifests;
+3. generates an SPDX JSON SBOM with Syft/Anchore;
+4. creates GitHub/Sigstore build provenance;
+5. creates a signed SBOM attestation bound to the release archive;
+6. publishes only after those gates complete.
 
-## Reproducible release model
-
-`scripts/repro_release.py` normalizes archive ownership and timestamps and produces `SHA256SUMS`. `.github/workflows/release.yml` rebuilds the archive twice and uses GitHub artifact attestations before publishing a tag release. Driver baseline updates remain separate reviewable PRs and are never auto-merged.
+GitHub artifact attestations provide SLSA v1.0 Build Level 2 provenance; stronger Build Level 3 isolation can be a future reusable-workflow hardening step.
 
 ## Safety invariants
 
-1. Rollback versions must be available before a transaction begins.
-2. Kernel module, user-space driver, GSP firmware, Fabric Manager, NVSDM, and related branch components remain release-aligned where applicable.
-3. Recovery retries are bounded; persistent failures remain visible instead of looping forever.
-4. MIG changes require a drained maintenance window.
-5. Immutable hosts are not silently converted into mutable hosts.
-6. GPU Operator integration is advisory and pinned; nvlx does not silently mutate a Kubernetes cluster.
-7. NVSDM CLI output is not treated as a stable API contract while NVIDIA labels that tool experimental.
-8. Tagged release artifacts must be byte-reproducible across two builds before attestation/publication.
-9. Diagnostic bundles are sanitized but must still be reviewed before external sharing.
+1. No fleet rollout advances with failed node qualification, DCGM burn-in, security gate, or quarantined nodes.
+2. Drain/quarantine operations require explicit `--yes`; recovery is separate and explicit.
+3. Kubernetes evictions use normal `kubectl drain` semantics rather than force-deleting arbitrary workloads.
+4. New NVIDIA security bulletins relevant to managed components block automated rollout until reviewed.
+5. A PSIRT baseline is never advanced automatically by the same workflow that evaluates it.
+6. Release artifacts must remain reproducible before provenance/SBOM attestation.
+7. Host-level v0.1-v0.5 safety invariants remain in force.
 
 ## Development
 
