@@ -19,8 +19,8 @@ class OperatorPlan:
     event_fingerprint: str|None = None
     def to_dict(self): return asdict(self)
 
-def _queue(attempt: int):
-    q=retry_plan(attempt)
+def _queue(attempt: int, jitter_key: str|None=None):
+    q=retry_plan(attempt,jitter_key=jitter_key)
     return q.to_dict()
 
 def plan(name: str, *, event_type: str, resource_version: str, generation: int, allowed: bool, runtime_action: str, reasons=(), current_wave: int=0, promoted: bool=False, attempt: int=0, expired: bool=False, latest_generation: int|None=None, previous_status_fingerprint: str|None=None, previous_event_fingerprint: str|None=None) -> OperatorPlan:
@@ -29,11 +29,11 @@ def plan(name: str, *, event_type: str, resource_version: str, generation: int, 
         return OperatorPlan("event-noop",None,None,None,None,efp)
     w=watch_decide(event_type,resource_version,expired=expired)
     if w.action=="relist":
-        q=_queue(attempt)
+        q=_queue(attempt,efp)
         return OperatorPlan("dead-letter" if q["dead_letter"] else "relist",None,None,q,None,efp)
     if w.action=="checkpoint": return OperatorPlan("checkpoint",None,None,None,None,efp)
     if w.action=="hold":
-        q=_queue(attempt)
+        q=_queue(attempt,efp)
         return OperatorPlan("dead-letter" if q["dead_letter"] else "hold",None,None,q,None,efp)
     if (event_type or "").strip().upper()=="DELETED":
         return OperatorPlan("observe-delete",None,None,None,None,efp)
@@ -48,9 +48,9 @@ def plan(name: str, *, event_type: str, resource_version: str, generation: int, 
         return OperatorPlan("status-noop",rd,None,None,status_fp,efp)
     p=patch_plan(resource_version,subresource="status")
     if not p.valid:
-        q=_queue(attempt)
+        q=_queue(attempt,efp)
         return OperatorPlan("dead-letter" if q["dead_letter"] else "hold",rd,p.to_dict(),q,status_fp,efp)
-    q=_queue(attempt) if r.requeue else None
+    q=_queue(attempt,efp) if r.requeue else None
     if q and q["dead_letter"]:
         return OperatorPlan("dead-letter",rd,p.to_dict(),q,status_fp,efp)
     return OperatorPlan("patch-status",rd,p.to_dict(),q,status_fp,efp)
