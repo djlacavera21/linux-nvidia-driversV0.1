@@ -29,26 +29,33 @@ jobs:
         run: python -m unittest discover -s tests -v
       - name: Reproducible archive smoke test
         run: |
-          python scripts/repro_release.py 1.5.6 --out /tmp/repro-a
-          python scripts/repro_release.py 1.5.6 --out /tmp/repro-b
+          python scripts/repro_release.py 1.5.7 --out /tmp/repro-a
+          python scripts/repro_release.py 1.5.7 --out /tmp/repro-b
           cmp /tmp/repro-a/SHA256SUMS /tmp/repro-b/SHA256SUMS
       - name: CLI smoke test
         run: |
-          nvlx --version | grep 1.5.6
+          nvlx --version | grep 1.5.7
           python - <<'PY'
-          import tempfile
+          import json, tempfile
           from pathlib import Path
-          from nvlx.leadership_v155 import FenceToken, validate
+          from nvlx.leadership_v155 import FenceToken
           from nvlx.fence_store_v156 import save, load
-          from nvlx.lease_renewal_v156 import classify
+          from nvlx.fence_recovery_v157 import assess
           with tempfile.TemporaryDirectory() as d:
               p=Path(d)/"fence.json"
               token=FenceToken("controller-a",7,"42")
               save(p,token)
               restored=load(p)
               assert restored == token
-              assert validate(restored,current_holder="controller-a",current_epoch=7,current_resource_version="42").allowed
-              assert not validate(restored,current_holder="controller-b",current_epoch=8,current_resource_version="43").allowed
-          assert classify(409,holder_unchanged=True,resource_version_unchanged=False).action == "relist-fence"
-          assert not classify(503,holder_unchanged=True,resource_version_unchanged=True).leadership_valid
+              assert assess(restored,current_holder="controller-a",current_epoch=7,current_resource_version="42").action == "restore"
+              data=json.loads(p.read_text())
+              data["token"]["epoch"]=8
+              p.write_text(json.dumps(data))
+              try:
+                  load(p)
+              except ValueError:
+                  pass
+              else:
+                  raise AssertionError("tampered fence store must fail closed")
+          assert assess(FenceToken("controller-a",8,"43"),current_holder="controller-a",current_epoch=7,current_resource_version="42").action == "rollback-detected"
           PY
