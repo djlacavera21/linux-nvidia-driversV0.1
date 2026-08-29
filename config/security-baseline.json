@@ -1,0 +1,15 @@
+{
+  "repository": "NVIDIA/product-security",
+  "baseline_commit": "6e8ef1666730b8906a3690505bb9f4311e68c228",
+  "relevant_terms": [
+    "GPU Display Driver",
+    "DCGM",
+    "DCGM Exporter",
+    "GPU Operator",
+    "Fabric Manager",
+    "Unified Fabric Manager",
+    "NVSDM",
+    "NVSwitch",
+    "NVOS"
+  ]
+}

@@ -7,6 +7,7 @@ on:
 
 permissions:
   contents: write
+  actions: read
   id-token: write
   attestations: write
 
@@ -26,10 +27,23 @@ jobs:
           cmp dist/one/SHA256SUMS dist/two/SHA256SUMS
           mkdir -p dist/release
           cp dist/one/* dist/release/
-      - name: Attest release provenance
+      - name: Generate SPDX SBOM
+        uses: anchore/sbom-action@v0
+        with:
+          path: .
+          format: spdx-json
+          output-file: dist/release/nvlx.spdx.json
+          upload-artifact: false
+          upload-release-assets: false
+      - name: Attest SLSA build provenance
         uses: actions/attest-build-provenance@v2
         with:
-          subject-checksums: dist/release/SHA256SUMS
+          subject-path: dist/release/*.tar.gz
+      - name: Attest SBOM
+        uses: actions/attest@v4
+        with:
+          subject-path: dist/release/*.tar.gz
+          sbom-path: dist/release/nvlx.spdx.json
       - uses: actions/upload-artifact@v4
         with:
           name: nvlx-reproducible-release
