@@ -1,25 +1,25 @@
-# nvlx: Linux-NVIDIA-Driver v1.5.5
+# nvlx: Linux-NVIDIA-Driver v1.5.6
 
-`nvlx` v1.5.5 is a fifth stabilization patch for the live Kubernetes operator. It hardens leadership handoff by binding mutation authority to an exact lease holder, fencing epoch, and Lease `resourceVersion`, while preserving the existing duplicate-event, retry, finalizer, shutdown, approval, rollback and security gates.
+`nvlx` v1.5.6 is a sixth stabilization patch for the live Kubernetes operator. It hardens the restart boundary by persisting leadership fencing tokens atomically and treating uncertain Lease renewal outcomes as mutation-fencing events rather than assuming leadership remains valid.
 
 > [!IMPORTANT]
-> A controller that loses leadership is no longer permitted to finish controller-owned Kubernetes writes using stale authority. Leadership loss removes mutation readiness immediately and forces the old leader into fenced drain/standby behavior.
+> A persisted token is evidence of previously observed authority, not authority by itself. After restart it must still match the current Lease holder, fencing epoch and Lease `resourceVersion`, and the Lease must still be fresh before controller-owned mutation is allowed.
 
-## v1.5.5 fixes
+## v1.5.6 fixes
 
-- **Leadership fencing token.** Mutation authority can be bound to the exact lease holder, leadership epoch and Lease `resourceVersion` observed before execution.
-- **Stale-leader rejection.** A holder, epoch or Lease `resourceVersion` change invalidates the token and returns a `fence` decision.
-- **Lease freshness.** Even an otherwise matching token is rejected when the Lease is stale.
-- **Operator mutation gate.** Internal reconciliation can return `fenced` before reconcile/status mutation when leadership authority has changed.
-- **Handoff drain semantics.** Leadership loss during an active mutation becomes `fence-drain`; once no mutation remains, the old replica becomes standby.
-- **Regression coverage.** Tests cover exact-token success, holder/epoch/resourceVersion handoff, stale leases, fenced operator plans and handoff drain behavior.
-- **1.5.4 retained.** Duplicate-event suppression, deterministic bounded retry jitter, ordered finalization, stale-generation guards and status-write idempotency remain active.
+- **Restart-safe fencing store.** Fence tokens are written through a temporary file, flushed with `fsync`, and atomically replaced.
+- **Fail-closed reload.** Missing state yields no token; malformed schema or invalid token values are rejected rather than silently accepted.
+- **Post-restart revalidation.** Restored tokens are rechecked against current Lease holder, epoch, resourceVersion and freshness before mutation.
+- **Lease renewal race handling.** `409`/`412` or observed resourceVersion changes force relist + fence; `404` loses leadership; `429` and 5xx outcomes remain retryable but mutation authority is fenced while renewal is uncertain.
+- **Handoff preservation.** Existing stale-leader fencing, fence-drain and standby semantics remain active through restart and renewal races.
+- **Regression coverage.** Tests cover persisted-token reload, stale persisted tokens after handoff, corrupt state, renewal conflicts, uncertain renewals and successful renewal.
+- **1.5.5 retained.** Exact Lease fencing tokens, duplicate-event suppression, bounded jitter, ordered finalization, stale-generation guards and status-write idempotency remain active.
 
 ## Safety invariants
 
-1. Mutation authority is valid only for the exact observed Lease holder, fencing epoch and Lease `resourceVersion`.
-2. Leadership loss blocks all subsequent controller-owned mutation writes from the old leader.
-3. A stale Lease cannot authorize mutation.
-4. In-flight work on a lost leader drains under a fence and cannot regain mutation authority without a new valid token.
-5. Standby replicas remain unable to mutate fleet state.
-6. All v0.1-v1.5.4 approval, rollback, Secure Boot, DRA, fabric, health/SLO, PSIRT, quarantine, audit, SBOM and provenance safeguards remain in force.
+1. Persisted fencing state cannot authorize mutation without live Lease revalidation.
+2. Corrupt persisted fencing state fails closed.
+3. A token restored after another controller took leadership is rejected.
+4. Lease renewal uncertainty removes mutation authority until leadership is re-established.
+5. Concurrent Lease updates force relist/revalidation instead of continuing with stale authority.
+6. All v0.1-v1.5.5 approval, rollback, Secure Boot, DRA, fabric, health/SLO, PSIRT, quarantine, audit, SBOM and provenance safeguards remain in force.
