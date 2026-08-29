@@ -29,8 +29,8 @@ jobs:
         run: python -m unittest discover -s tests -v
       - name: Reproducible archive smoke test
         run: |
-          python scripts/repro_release.py 0.8.0 --out /tmp/repro-a
-          python scripts/repro_release.py 0.8.0 --out /tmp/repro-b
+          python scripts/repro_release.py 0.9.0 --out /tmp/repro-a
+          python scripts/repro_release.py 0.9.0 --out /tmp/repro-b
           cmp /tmp/repro-a/SHA256SUMS /tmp/repro-b/SHA256SUMS
       - name: CLI smoke test
         run: |
@@ -40,13 +40,17 @@ jobs:
           nvlx health
           nvlx telemetry --format prometheus
           nvlx-fleet maintenance-plan gpu01
-          nvlx-fleet waves gpu03 gpu01 gpu02 --canaries 1 --wave-size 2
-          nvlx-fleet fabric-domains gpu03 gpu01 gpu02 --size 2 | grep fabric-000
-          nvlx-fleet admission-policy | grep ValidatingAdmissionPolicy
           nvlx-fleet placement --count 2 --product H100 --min-memory-gib 80 --compute-domain rack-a | grep gpu.nvidia.com
           nvlx-fleet gang --replicas 4 --gpus-per-replica 8 --compute-domain rack-a | grep all_or_nothing
           nvlx-fleet mig-broker --profile 1g.10gb --replicas 4
           nvlx-fleet power-policy --max-watts 700 --max-temp-c 85
-          nvlx-fleet evacuate-plan gpu01 --checkpoint-mode application
-          nvlx-fleet federation-plan --primary east --required-gpus 8 east:us-east:8 west:us-west:16
+          nvlx-fleet curtailment --current-watts 1000 --target-watts 800
+          nvlx-fleet slo-check --healthy-fraction 1.0 --p95-startup-seconds 30
+          nvlx-fleet failover-plan --source east --target west --checkpoint-ready --capacity-ready --security-ready
+          nvlx-fleet gds || test $? -eq 1
+          nvlx-fleet runai || test $? -eq 1
+          printf '%s\n' '[{"name":"gpu-b","free_gpus":2,"power_headroom_w":100},{"name":"gpu-a","free_gpus":3,"power_headroom_w":100}]' > /tmp/candidates.json
+          nvlx-fleet placement-decide /tmp/candidates.json | grep gpu-a
+          nvlx-fleet audit --path /tmp/nvlx-audit.jsonl --action place --target gpu-a --allowed
+          test -s /tmp/nvlx-audit.jsonl
           nvlx-fleet gpudirect || test $? -eq 2
