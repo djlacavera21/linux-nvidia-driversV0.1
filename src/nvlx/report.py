@@ -20,6 +20,7 @@ def _sanitize(value):
     if isinstance(value,str): return sanitize_text(value)
     if isinstance(value,dict): return {k:_sanitize(v) for k,v in value.items() if k.lower() not in {'serial','uuid','machine_id'}}
     if isinstance(value,list): return [_sanitize(v) for v in value]
+    if isinstance(value,tuple): return tuple(_sanitize(v) for v in value)
     return value
 
 def build_report() -> dict[str,object]:
