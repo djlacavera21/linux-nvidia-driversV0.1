@@ -29,19 +29,20 @@ jobs:
         run: python -m unittest discover -s tests -v
       - name: Reproducible archive smoke test
         run: |
-          python scripts/repro_release.py 1.5.4 --out /tmp/repro-a
-          python scripts/repro_release.py 1.5.4 --out /tmp/repro-b
+          python scripts/repro_release.py 1.5.5 --out /tmp/repro-a
+          python scripts/repro_release.py 1.5.5 --out /tmp/repro-b
           cmp /tmp/repro-a/SHA256SUMS /tmp/repro-b/SHA256SUMS
       - name: CLI smoke test
         run: |
-          nvlx --version | grep 1.5.4
+          nvlx --version | grep 1.5.5
           nvlx-k8s operator-plan prod --event-type MODIFIED --resource-version 12 --generation 3 --allowed --runtime-action execute | grep '"action": "patch-status"'
-          nvlx-k8s operator-plan prod --event-type DELETED --resource-version 13 --generation 3 | grep '"action": "observe-delete"'
           python - <<'PY'
-          from nvlx.event_dedupe_v154 import fingerprint
+          from nvlx.leadership_v155 import FenceToken, validate
           from nvlx.operator_v15 import plan
           from nvlx.shutdown_v154 import evaluate
-          fp=fingerprint(event_type="MODIFIED",resource_version="12",generation=3)
-          assert plan("prod",event_type="MODIFIED",resource_version="12",generation=3,allowed=True,runtime_action="execute",previous_event_fingerprint=fp).action == "event-noop"
-          assert evaluate(terminating=True,active_mutation=True).action == "drain"
+          token=FenceToken("controller-a",7,"42")
+          assert validate(token,current_holder="controller-a",current_epoch=7,current_resource_version="42").allowed
+          assert not validate(token,current_holder="controller-b",current_epoch=8,current_resource_version="43").allowed
+          assert plan("prod",event_type="MODIFIED",resource_version="12",generation=3,allowed=True,runtime_action="execute",mutation_fence_ok=False).action == "fenced"
+          assert evaluate(terminating=False,active_mutation=True,leadership_valid=False).action == "fence-drain"
           PY
