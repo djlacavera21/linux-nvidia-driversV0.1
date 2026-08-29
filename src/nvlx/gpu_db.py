@@ -41,8 +41,11 @@ class GpuClassification:
 
 
 def upstream_readme_url(config: DriverConfig) -> str:
-    repo = config.upstream_repo.removesuffix(".git")
-    return f"{repo}/raw/refs/tags/{config.version}/README.md"
+    match = re.fullmatch(r"https://github\.com/([^/]+)/([^/]+?)(?:\.git)?", config.upstream_repo)
+    if not match:
+        raise RuntimeError("GPU database sync requires a github.com NVIDIA upstream repository URL")
+    owner, repo = match.groups()
+    return f"https://raw.githubusercontent.com/{owner}/{repo}/{config.version}/README.md"
 
 
 def default_database_path(config: DriverConfig) -> Path:
@@ -84,7 +87,7 @@ def parse_supported_gpu_table(markdown: str) -> list[GpuRecord]:
 
 def sync_gpu_database(path: Path, config: DriverConfig) -> int:
     url = upstream_readme_url(config)
-    with urlopen(url, timeout=20) as response:  # nosec B310: fixed HTTPS GitHub URL derived from config
+    with urlopen(url, timeout=20) as response:  # nosec B310: pinned HTTPS GitHub raw-content URL
         markdown = response.read().decode("utf-8")
     records = parse_supported_gpu_table(markdown)
     if not records:
