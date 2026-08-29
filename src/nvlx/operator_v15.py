@@ -23,7 +23,7 @@ def _queue(attempt: int, jitter_key: str|None=None):
     q=retry_plan(attempt,jitter_key=jitter_key)
     return q.to_dict()
 
-def plan(name: str, *, event_type: str, resource_version: str, generation: int, allowed: bool, runtime_action: str, reasons=(), current_wave: int=0, promoted: bool=False, attempt: int=0, expired: bool=False, latest_generation: int|None=None, previous_status_fingerprint: str|None=None, previous_event_fingerprint: str|None=None) -> OperatorPlan:
+def plan(name: str, *, event_type: str, resource_version: str, generation: int, allowed: bool, runtime_action: str, reasons=(), current_wave: int=0, promoted: bool=False, attempt: int=0, expired: bool=False, latest_generation: int|None=None, previous_status_fingerprint: str|None=None, previous_event_fingerprint: str|None=None, mutation_fence_ok: bool=True) -> OperatorPlan:
     efp=event_fingerprint(event_type=event_type,resource_version=resource_version,generation=generation)
     if event_duplicate(efp,previous_event_fingerprint):
         return OperatorPlan("event-noop",None,None,None,None,efp)
@@ -41,6 +41,8 @@ def plan(name: str, *, event_type: str, resource_version: str, generation: int, 
         gd=generation_evaluate(generation,latest_generation)
         if gd.stale:
             return OperatorPlan("discard-stale",None,None,None,None,efp)
+    if not mutation_fence_ok:
+        return OperatorPlan("fenced",None,None,None,None,efp)
     r=reconcile(name,generation=generation,allowed=allowed,runtime_action=runtime_action,runtime_reasons=reasons,current_wave=current_wave,promoted=promoted)
     rd=r.to_dict()
     did_change,status_fp=status_changed(rd,previous_status_fingerprint)
