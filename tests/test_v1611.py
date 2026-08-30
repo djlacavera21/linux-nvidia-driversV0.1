@@ -1,7 +1,7 @@
 import io, json, unittest
 from urllib import error
 from unittest import mock
-from nvlx.k8s_api_v16 import KubeClient, ApiError
+from nvlx.k8s_api_v16 import KubeClient, ApiError, ApiResponse
 from nvlx.runtime_v16 import Runtime
 
 class EventClient:
@@ -10,10 +10,10 @@ class EventClient:
         self.events=0
     def patch_status(self,name,rv,status):
         self.patches += 1
-        return None
+        return ApiResponse(200,{"metadata":{"name":name,"resourceVersion":"11"},"status":status},"11")
     def create_event(self,*args,**kwargs):
         self.events += 1
-        return None
+        return ApiResponse(201,{"metadata":{"resourceVersion":"1"}},"1")
 
 class V1611Tests(unittest.TestCase):
     def fleet(self):
@@ -39,8 +39,7 @@ class V1611Tests(unittest.TestCase):
         exc=error.HTTPError("http://kube/api",500,"server error",{},io.BytesIO(payload))
         client=KubeClient("http://127.0.0.1:1",token=token,timeout=1)
         with mock.patch("urllib.request.urlopen",side_effect=exc):
-            with self.assertRaises(ApiError) as ctx:
-                client.list_fleets()
+            with self.assertRaises(ApiError) as ctx: client.list_fleets()
         rendered=str(ctx.exception)
         self.assertNotIn(token,rendered)
         self.assertIn("<redacted>",rendered)
