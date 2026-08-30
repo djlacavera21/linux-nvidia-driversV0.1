@@ -37,7 +37,7 @@ class V161Tests(unittest.TestCase):
         self.assertEqual(ctx.exception.status,0)
         self.assertNotIn("super-secret",str(ctx.exception))
     def test_leader_loss_after_conflict_blocks_retry_write(self):
-        client=FakeClient(); calls=iter([True,False])
+        client=FakeClient(); calls=iter([True,True,False])
         r=Runtime(client,"pod-a",leader_check=lambda:next(calls,False))
         obj={"metadata":{"name":"prod","uid":"u1","resourceVersion":"10","generation":1,"annotations":{"nvlx.io/approved":"true"}}}
         self.assertEqual(r.reconcile_object(obj),"fenced")
