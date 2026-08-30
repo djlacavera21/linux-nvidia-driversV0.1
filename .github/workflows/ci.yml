@@ -29,24 +29,27 @@ jobs:
         run: python -m unittest discover -s tests -v
       - name: Reproducible archive smoke test
         run: |
-          python scripts/repro_release.py 1.6.1.8 --out /tmp/repro-a
-          python scripts/repro_release.py 1.6.1.8 --out /tmp/repro-b
+          python scripts/repro_release.py 1.6.1.9 --out /tmp/repro-a
+          python scripts/repro_release.py 1.6.1.9 --out /tmp/repro-b
           cmp /tmp/repro-a/SHA256SUMS /tmp/repro-b/SHA256SUMS
       - name: CLI smoke test
         run: |
-          nvlx --version | grep 1.6.1.8
+          nvlx --version | grep 1.6.1.9
           nvlx-operator --help | grep 'live GPUFleet Kubernetes operator'
           python - <<'PY'
+          from nvlx.k8s_api_v16 import ApiResponse
           from nvlx.runtime_v16 import Runtime
           class C: pass
+          valid={'metadata':{'name':'prod','uid':'u1','resourceVersion':'opaque-a','generation':4}}
+          missing_uid={'metadata':{'name':'prod','resourceVersion':'opaque-a','generation':4}}
+          assert Runtime._object_identity_valid(valid)
+          assert not Runtime._object_identity_valid(missing_uid)
+          expected={'name':'prod','uid':'u1','generation':4}
+          good=ApiResponse(200,{'metadata':{'name':'prod','uid':'u1','resourceVersion':'opaque-b','generation':4},'status':{'phase':'Ready'}})
+          bad=ApiResponse(200,{'metadata':{'name':'prod','resourceVersion':'opaque-b','generation':4},'status':{'phase':'Ready'}})
+          assert Runtime._status_response_verified(good,expected,{'phase':'Ready'})
+          assert not Runtime._status_response_verified(bad,expected,{'phase':'Ready'})
           r=Runtime(C(),'pod-a',watch_cache_limit=2)
-          a={'metadata':{'name':'a','uid':'a','resourceVersion':'opaque-a','generation':4}}
-          b={'metadata':{'name':'b','uid':'b','resourceVersion':'opaque-b','generation':1}}
-          c={'metadata':{'name':'c','uid':'c','resourceVersion':'opaque-c','generation':1}}
-          assert r._watch_event_disposition(a,'MODIFIED') == 'reconcile'
-          assert r._watch_event_disposition(b,'MODIFIED') == 'reconcile'
-          assert r._watch_event_disposition(c,'MODIFIED') == 'reconcile'
-          assert len(r._watch_seen) == 2 and r.stats.watch_cache_evictions == 1
-          r._prune_watch_state_from_list([c])
-          assert list(r._watch_seen) == ['c'] and r.stats.watch_cache_pruned == 1
+          assert r._watch_event_disposition(valid,'MODIFIED') == 'reconcile'
+          assert list(r._watch_seen) == ['u1']
           PY

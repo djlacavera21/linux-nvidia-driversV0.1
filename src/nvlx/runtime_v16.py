@@ -73,9 +73,7 @@ class Runtime:
         if not isinstance(meta,dict): return None
         rv=meta.get("resourceVersion")
         if not isinstance(rv,str) or not rv.strip(): return None
-        if expected_name:
-            name=meta.get("name")
-            if name is not None and name != expected_name: return None
+        if expected_name and meta.get("name") != expected_name: return None
         return meta
 
     @staticmethod
@@ -83,8 +81,10 @@ class Runtime:
         if not isinstance(obj,dict): return False
         meta=obj.get("metadata")
         if not isinstance(meta,dict): return False
-        name=meta.get("name"); rv=meta.get("resourceVersion")
-        if not isinstance(name,str) or not name or not isinstance(rv,str) or not rv: return False
+        name=meta.get("name"); uid=meta.get("uid"); rv=meta.get("resourceVersion")
+        if not isinstance(name,str) or not name.strip(): return False
+        if not isinstance(uid,str) or not uid.strip(): return False
+        if not isinstance(rv,str) or not rv.strip(): return False
         generation=meta.get("generation",0)
         try: return int(generation or 0) >= 0
         except (TypeError,ValueError): return False
@@ -93,14 +93,14 @@ class Runtime:
     def _watch_key(obj: dict) -> tuple[str,str,int,str]:
         meta=obj["metadata"]
         name=meta["name"]
-        uid=meta.get("uid") if isinstance(meta.get("uid"),str) else ""
+        uid=meta["uid"]
         generation=int(meta.get("generation",0) or 0)
         rv=meta["resourceVersion"]
         return (name,uid,generation,rv)
 
     @staticmethod
     def _watch_cache_key(name: str, uid: str) -> str:
-        return uid or f"name:{name}"
+        return uid
 
     def _remember_watch_state(self, key: str, fingerprint: tuple[str,str,int,str]) -> None:
         if key not in self._watch_seen and len(self._watch_seen) >= self.watch_cache_limit:
@@ -144,7 +144,7 @@ class Runtime:
                 if event_type==prev_type or (event_type in {"ADDED","MODIFIED"} and prev_type in {"LIST","ADDED","MODIFIED"}):
                     self.stats.duplicate_watch_events += 1
                     return "duplicate"
-            if uid and prev_uid==uid and generation < prev_generation:
+            if prev_uid==uid and generation < prev_generation:
                 self.stats.stale_generation_events += 1
                 return "stale-generation"
         self._remember_watch_state(key,(event_type,uid,generation,rv))
@@ -156,12 +156,11 @@ class Runtime:
     @classmethod
     def _status_response_verified(cls, response: ApiResponse | None, expected_meta: dict, expected_status: dict) -> bool:
         expected_name=expected_meta.get("name","")
+        expected_uid=expected_meta.get("uid","")
+        if not isinstance(expected_name,str) or not expected_name or not isinstance(expected_uid,str) or not expected_uid: return False
         meta=cls._response_meta(response,expected_name)
         if meta is None or not isinstance(response.body,dict): return False
-        expected_uid=expected_meta.get("uid")
-        if expected_uid:
-            returned_uid=meta.get("uid")
-            if returned_uid is not None and returned_uid != expected_uid: return False
+        if meta.get("uid") != expected_uid: return False
         expected_generation=expected_meta.get("generation")
         if expected_generation is not None and "generation" in meta:
             try:
@@ -174,9 +173,10 @@ class Runtime:
         return True
 
     @classmethod
-    def _finalizer_response_verified(cls, response: ApiResponse | None, expected_name: str, expected_finalizers: list[str]) -> bool:
+    def _finalizer_response_verified(cls, response: ApiResponse | None, expected_name: str, expected_finalizers: list[str], expected_uid: str="") -> bool:
         meta=cls._response_meta(response,expected_name)
         if meta is None: return False
+        if expected_uid and meta.get("uid") != expected_uid: return False
         finalizers=meta.get("finalizers")
         if not isinstance(finalizers,list) or not all(isinstance(x,str) for x in finalizers): return False
         if PROTECTIVE_FINALIZER in finalizers: return False
@@ -202,7 +202,7 @@ class Runtime:
         expected_generation=original_meta.get("generation",0)
         name=meta.get("name"); uid=meta.get("uid"); rv=meta.get("resourceVersion"); generation=meta.get("generation",0)
         if name != expected_name: return False,""
-        if expected_uid and uid != expected_uid: return False,""
+        if not isinstance(expected_uid,str) or not expected_uid or uid != expected_uid: return False,""
         try:
             if int(generation or 0) != int(expected_generation or 0): return False,""
         except (TypeError,ValueError): return False,""
@@ -246,7 +246,7 @@ class Runtime:
         remaining=[x for x in finalizers if x != PROTECTIVE_FINALIZER]
         try:
             response=self.client.patch_finalizers(meta.get("name",""),meta.get("resourceVersion",""),remaining)
-            return self._finalizer_response_verified(response,meta.get("name",""),remaining)
+            return self._finalizer_response_verified(response,meta.get("name",""),remaining,meta.get("uid",""))
         except ApiError as e:
             if e.status in {409,412,404,410}: return False
             raise
