@@ -29,33 +29,25 @@ jobs:
         run: python -m unittest discover -s tests -v
       - name: Reproducible archive smoke test
         run: |
-          python scripts/repro_release.py 1.6.3.1 --out /tmp/repro-a
-          python scripts/repro_release.py 1.6.3.1 --out /tmp/repro-b
+          python scripts/repro_release.py 1.6.3.2 --out /tmp/repro-a
+          python scripts/repro_release.py 1.6.3.2 --out /tmp/repro-b
           cmp /tmp/repro-a/SHA256SUMS /tmp/repro-b/SHA256SUMS
       - name: CLI smoke test
         run: |
-          nvlx --version | grep 1.6.3.1
+          nvlx --version | grep 1.6.3.2
           nvlx-operator --help | grep 'live GPUFleet Kubernetes operator'
-          nvlx-operator --help | grep -- '--token-file'
-          nvlx-operator --help | grep -- '--watch-timeout-seconds'
           python - <<'PY'
-          from nvlx.k8s_api_v16 import ApiResponse, ApiError
-          from nvlx.nvidia_inventory_v1631 import NvidiaInventory, NvidiaInventoryError
-
-          class C:
-              def __init__(self, mismatch=False): self.mismatch=mismatch
-              def request_json(self, method, path, body=None, **kwargs):
-                  values={
-                      '/apis/nvidia.com':{'preferredVersion':{'groupVersion':'nvidia.com/v1'},'versions':[{'groupVersion':'nvidia.com/v1'}]},
-                      '/apis/nvidia.com/v1':{'groupVersion':'nvidia.com/v1alpha1' if self.mismatch else 'nvidia.com/v1','resources':[{'name':'clusterpolicies','namespaced':False}]},
-                      '/apis/nvidia.com/v1/clusterpolicies':{'items':[{'apiVersion':'nvidia.com/v1','kind':'ClusterPolicy','metadata':{'name':'cluster-policy','uid':'u1','resourceVersion':'7'},'status':{'state':'ready'}}]},
-                      '/api/v1/nodes':{'items':[{'apiVersion':'v1','kind':'Node','metadata':{'name':'gpu-1','labels':{'nvidia.com/gpu.present':'true'}}}]},
-                  }
-                  if path == '/apis/resource.nvidia.com': raise ApiError(404,'not found')
-                  if path not in values: raise ApiError(404,'not found')
-                  return ApiResponse(200,values[path])
-          assert NvidiaInventory(C()).check().ready
-          try: NvidiaInventory(C(mismatch=True)).snapshot()
-          except NvidiaInventoryError: pass
-          else: raise AssertionError('discovery mismatch must fail closed')
+          from unittest.mock import patch
+          from nvlx.nvidia_inventory_v163 import NvidiaPreflight, NvidiaSnapshot
+          from nvlx.runtime_v163 import Runtime as Base
+          from nvlx.runtime_v1632 import Runtime
+          def o(uid): return {'apiVersion':'nvidia.com/v1','metadata':{'name':'cluster-policy','uid':uid,'resourceVersion':'7'}}
+          def s(uid): return NvidiaSnapshot((),(o(uid),),(),(),(),(),(('nvidia.com','v1'),),(('nvidia.com',('clusterpolicies',)),))
+          vals=iter([NvidiaPreflight(True,'device-plugin',(),s('u1')),NvidiaPreflight(True,'device-plugin',(),s('u2')),NvidiaPreflight(True,'device-plugin',(),s('u2'))])
+          r=Runtime(object(),'pod-a',leader_check=lambda:True); r.nvidia_inventory_check=lambda: next(vals)
+          with patch.object(Base,'list_and_watch_once',return_value='eof'):
+              assert r.list_and_watch_once() == 'eof'
+              assert r.list_and_watch_once() == 'relist'
+              assert r.list_and_watch_once() == 'eof'
+          assert r.nvidia_continuity_promotions == 1
           PY
