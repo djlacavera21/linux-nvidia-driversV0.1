@@ -45,6 +45,13 @@ class KubeClient:
         if self.token: headers["Authorization"]="Bearer "+self.token
         return request.Request(self.base_url+path,data=data,headers=headers,method=method)
 
+    def _api_error(self, status: int, reason) -> ApiError:
+        clean=str(reason or "request failed")
+        if self.token:
+            clean=clean.replace("Bearer "+self.token,"Bearer <redacted>")
+            clean=clean.replace(self.token,"<redacted>")
+        return ApiError(status,clean)
+
     @staticmethod
     def _decode_json(raw: bytes):
         if not raw: return None
@@ -61,12 +68,16 @@ class KubeClient:
         except error.HTTPError as e:
             raw=e.read().decode("utf-8","replace")
             try:
-                parsed=json.loads(raw); reason=parsed.get("message") or parsed.get("reason") or e.reason
+                parsed=json.loads(raw)
+                reason=(parsed.get("message") or parsed.get("reason") or e.reason) if isinstance(parsed,dict) else e.reason
             except Exception: reason=e.reason
-            raise ApiError(e.code,str(reason)) from None
+            raise self._api_error(e.code,reason) from None
         except (error.URLError,socket.timeout,TimeoutError) as e:
-            reason=getattr(e,"reason",None) or "request timed out" if isinstance(e,(socket.timeout,TimeoutError)) else "connection failed"
-            raise ApiError(0,str(reason)) from None
+            if isinstance(e,(socket.timeout,TimeoutError)):
+                reason="request timed out"
+            else:
+                reason=getattr(e,"reason",None) or "connection failed"
+            raise self._api_error(0,reason) from None
 
     def watch_lines(self, path: str):
         """Yield decoded Kubernetes watch events; malformed lines are ignored safely."""
@@ -79,10 +90,18 @@ class KubeClient:
                     except (UnicodeDecodeError,json.JSONDecodeError): continue
                     if isinstance(value,dict): yield value
         except error.HTTPError as e:
-            raise ApiError(e.code,str(e.reason)) from None
+            raw=e.read().decode("utf-8","replace")
+            try:
+                parsed=json.loads(raw)
+                reason=(parsed.get("message") or parsed.get("reason") or e.reason) if isinstance(parsed,dict) else e.reason
+            except Exception: reason=e.reason
+            raise self._api_error(e.code,reason) from None
         except (error.URLError,socket.timeout,TimeoutError) as e:
-            reason=getattr(e,"reason",None) or "watch timed out" if isinstance(e,(socket.timeout,TimeoutError)) else "connection failed"
-            raise ApiError(0,str(reason)) from None
+            if isinstance(e,(socket.timeout,TimeoutError)):
+                reason="watch timed out"
+            else:
+                reason=getattr(e,"reason",None) or "connection failed"
+            raise self._api_error(0,reason) from None
 
     def list_fleets(self) -> ApiResponse:
         return self.request_json("GET","/apis/nvlx.io/v1alpha1/gpufleets")
