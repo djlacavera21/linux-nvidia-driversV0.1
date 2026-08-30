@@ -29,22 +29,28 @@ jobs:
         run: python -m unittest discover -s tests -v
       - name: Reproducible archive smoke test
         run: |
-          python scripts/repro_release.py 1.6.2 --out /tmp/repro-a
-          python scripts/repro_release.py 1.6.2 --out /tmp/repro-b
+          python scripts/repro_release.py 1.6.2.1 --out /tmp/repro-a
+          python scripts/repro_release.py 1.6.2.1 --out /tmp/repro-b
           cmp /tmp/repro-a/SHA256SUMS /tmp/repro-b/SHA256SUMS
       - name: CLI smoke test
         run: |
-          nvlx --version | grep 1.6.2
+          nvlx --version | grep 1.6.2.1
           nvlx-operator --help | grep 'live GPUFleet Kubernetes operator'
           nvlx-operator --help | grep -- '--token-file'
           nvlx-operator --help | grep -- '--watch-timeout-seconds'
           python - <<'PY'
-          from urllib.parse import parse_qs, urlsplit
-          from nvlx.k8s_api_v16 import KubeClient
-          from nvlx.runtime_v16 import Runtime
-          c=KubeClient('http://127.0.0.1:1',timeout=2,watch_timeout=41,watch_timeout_seconds=30)
-          q=parse_qs(urlsplit(c.watch_path('opaque')).query)
-          assert q['timeoutSeconds']==['30']
-          valid={'metadata':{'name':'prod','uid':'u1','resourceVersion':'opaque-a','generation':4}}
-          assert Runtime._object_identity_valid(valid)
+          from datetime import datetime, timedelta, timezone
+          from nvlx.lease_v16 import LeaseElector
+          from nvlx.runtime_v1621 import Runtime
+          class C:
+              def list_fleets(self):
+                  from nvlx.k8s_api_v16 import ApiResponse
+                  return ApiResponse(200,{'metadata':{'resourceVersion':'rv'},'items':[]})
+              def watch_path(self,rv): return '/watch'
+              def watch_lines(self,path): return iter(())
+          e=LeaseElector(object(),'pod-a',max_clock_skew_seconds=5)
+          now=datetime.now(timezone.utc)
+          assert not e._fresh({'renewTime':(now+timedelta(seconds=6)).isoformat().replace('+00:00','Z'),'leaseDurationSeconds':30},now)
+          r=Runtime(C(),'pod-a',leader_check=lambda:True,leader_fresh_seconds=25)
+          assert r.list_and_watch_once() == 'eof' and r.ready()
           PY
