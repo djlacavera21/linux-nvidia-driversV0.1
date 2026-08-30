@@ -158,9 +158,34 @@ def _strict_nonnegative_int_field(diagnosis, name: str) -> int:
     return value
 
 
+def _typed_serving_gates_pass(snapshot: ReadinessSnapshot) -> bool:
+    return bool(
+        snapshot.api_reachable
+        and snapshot.leader
+        and snapshot.leadership_fresh
+        and snapshot.inventory_fresh
+        and snapshot.nvidia_preflight_ready
+        and snapshot.checkpoint_ready
+        and not snapshot.terminating
+    )
+
+
+def _validate_typed_readiness_domain(snapshot: ReadinessSnapshot) -> None:
+    if snapshot.leadership_fresh and (
+        not snapshot.api_reachable or not snapshot.leader or snapshot.terminating
+    ):
+        raise ValueError(
+            "fresh leadership requires API reachability, effective leadership and non-termination"
+        )
+    if snapshot.controller_ready and not _typed_serving_gates_pass(snapshot):
+        raise ValueError(
+            "controller readiness cannot contradict exported serving gates"
+        )
+
+
 def _coerce_readiness_diagnosis(diagnosis) -> ReadinessSnapshot:
     """Validate a runtime-owned diagnosis and normalize it to the HTTP presentation shape."""
-    return ReadinessSnapshot(
+    snapshot = ReadinessSnapshot(
         controller_ready=_strict_bool_field(diagnosis, "controller_ready"),
         api_reachable=_strict_bool_field(diagnosis, "api_reachable"),
         leader=_strict_bool_field(diagnosis, "leader"),
@@ -172,6 +197,8 @@ def _coerce_readiness_diagnosis(diagnosis) -> ReadinessSnapshot:
         checkpoint_ready=_strict_bool_field(diagnosis, "checkpoint_ready"),
         terminating=_strict_bool_field(diagnosis, "terminating"),
     )
+    _validate_typed_readiness_domain(snapshot)
+    return snapshot
 
 
 def _runtime_readiness_snapshot(runtime) -> ReadinessSnapshot:
