@@ -1,29 +1,29 @@
-# nvlx: Linux-NVIDIA-Driver v1.6.2.2
+# nvlx: Linux-NVIDIA-Driver v1.6.2.3
 
-`nvlx` v1.6.2.2 is a narrow post-1.6.2.1 runtime-safety hotfix. It preserves the Kubernetes API surface and NVIDIA read-only boundary while making locally cached leadership proof fail closed across API loss, failed probes, stale readiness and list/watch exceptions.
+`nvlx` v1.6.2.3 is a narrow post-1.6.2.2 runtime-safety hotfix. It preserves the Kubernetes API surface and NVIDIA read-only boundary while making GPUFleet inventory freshness an explicit list/watch continuity proof rather than a sticky flag from an older snapshot.
 
 > [!IMPORTANT]
-> NVIDIA resource changes remain read-only in v1.6.2.2. The operator mutates only nvlx-owned GPUFleet status/finalizers plus its Lease and Events; driver/GPU Operator mutation remains deferred.
+> NVIDIA resource changes remain read-only in v1.6.2.3. The operator mutates only nvlx-owned GPUFleet status/finalizers plus its Lease and Events; driver/GPU Operator mutation remains deferred.
 
-## v1.6.2.2 hotfixes
+## v1.6.2.3 hotfixes
 
-- **Immediate leadership invalidation.** A reusable runtime helper now clears both `stats.leader` and the monotonic timestamp of the last verified Lease whenever leadership proof becomes invalid.
-- **API-loss proof clearing.** If list/watch transport handling marks the Kubernetes API unreachable, the runtime clears cached leadership before returning a reconnect/relist outcome.
-- **List failure fencing.** A list/relist exception cannot carry a previous successful Lease verification into a later retry cycle.
-- **Readiness fail-closed cleanup.** `/readyz` on an API-unreachable runtime actively erases cached leadership proof instead of only returning not-ready while leaving old proof resident.
-- **Stale proof cleanup.** When the verified-leadership freshness window expires, both the local leader flag and cached monotonic verification timestamp are cleared.
-- **Failed-probe cleanup retained.** Explicit failed Lease probes continue to revoke local leadership immediately.
-- **Successful quiet-cluster behavior retained.** A successful empty relist still renews/verifies the Lease and remains ready while the proof is within the configured freshness window.
-- **Prior safeguards retained.** Lease clock-skew fencing, timezone-aware freshness, 20-second Kubernetes watch lifetime, 25-second watch socket timeout, conflict-safe status/finalizer recomputation, UID-bound mutation verification, token-file auth, opaque resourceVersion semantics and verified Lease writes remain active.
+- **Inventory freshness invalidation.** A reusable runtime layer clears `stats.inventory_fresh` whenever list/watch continuity ends or a replacement snapshot cannot be proven valid.
+- **Relist starts stale.** Beginning a new list/relist immediately invalidates the previous inventory proof; only a fully validated replacement list may set inventory fresh again.
+- **EOF fencing.** A clean watch EOF ends continuity for the preceding snapshot and therefore clears inventory freshness before reconnect/backoff.
+- **Relist/reconnect fencing.** `410` relist signals, transient reconnects and non-retryable watch errors all invalidate the prior inventory proof before returning to the outer loop.
+- **Malformed-list fencing.** A malformed replacement list cannot inherit `inventory_fresh=True` from an older successful snapshot.
+- **Shutdown cleanup.** Operator shutdown clears inventory freshness together with leadership state.
+- **Proof separation.** Lease leadership and inventory continuity remain separate proofs: a valid Lease may remain locally fresh across a non-transport relist signal, but readiness stays false until a new inventory snapshot is validated.
+- **Prior safeguards retained.** Immediate leadership invalidation on API loss, Lease clock-skew fencing, timezone-aware Lease freshness, 20-second Kubernetes watch lifetime, 25-second watch socket timeout, conflict-safe status/finalizer recomputation, UID-bound mutation verification, token-file auth, opaque resourceVersion semantics and verified Lease writes remain active.
 
 ## Safety invariants
 
-1. Cached Lease verification is erased whenever Kubernetes API reachability is lost.
-2. A list/watch exception cannot leave stale leadership proof available for a later cycle.
-3. Readiness cannot rely on an old verified timestamp after the API has become unreachable.
-4. Expired leadership proof clears both timestamp and local leader state.
-5. Successful Lease verification on a healthy quiet cluster remains usable only within the configured freshness window.
+1. `inventory_fresh` represents an active validated list/watch continuity window, not merely a previously successful list.
+2. Starting a relist clears the previous inventory proof before the replacement list is fetched and validated.
+3. EOF, reconnect, relist and watch-error outcomes cannot leave stale inventory marked fresh during backoff.
+4. A malformed or failed replacement list cannot reuse an older inventory-fresh state.
+5. Leadership freshness and inventory freshness are independent readiness requirements.
 6. Kubernetes `resourceVersion` remains opaque and is never numerically or lexically ordered.
 7. Conflict retries remain bounded and leadership-fenced.
-8. NVIDIA resources remain read-only in v1.6.2.2.
-9. All v0.1-v1.6.2.1 approval, rollback, Secure Boot, DRA, fabric, health/SLO, PSIRT, quarantine, audit, SBOM, provenance, fencing, replay, UID-integrity and Lease-CAS safeguards remain in force.
+8. NVIDIA resources remain read-only in v1.6.2.3.
+9. All v0.1-v1.6.2.2 approval, rollback, Secure Boot, DRA, fabric, health/SLO, PSIRT, quarantine, audit, SBOM, provenance, fencing, replay, UID-integrity and Lease-CAS safeguards remain in force.
