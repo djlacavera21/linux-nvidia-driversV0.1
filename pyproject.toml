@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "nvlx"
-version = "1.5.8"
-description = "Live Kubernetes NVIDIA GPU fleet operator with monotonic fencing persistence, rollback-aware restart recovery, guarded reacquisition, and fail-closed leadership mutation fencing"
+version = "1.5.9"
+description = "Live Kubernetes NVIDIA GPU fleet operator with sequenced fencing checkpoints, replay detection, monotonic recovery, and fail-closed leadership mutation fencing"
 readme = "README.md"
 requires-python = ">=3.11"
 license = {text = "MIT"}
