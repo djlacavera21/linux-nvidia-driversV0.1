@@ -28,9 +28,9 @@ class Handler(BaseHTTPRequestHandler):
         if self.path.endswith("/status"):
             if FakeState.conflict_once and FakeState.status_patches==0:
                 FakeState.status_patches += 1; return self._json(409,{"message":"conflict"})
-            FakeState.status_patches += 1; return self._json(200,{"metadata":{"resourceVersion":"12"},"status":body.get("status")})
+            FakeState.status_patches += 1; return self._json(200,{"metadata":{"name":"prod","uid":"u1","generation":1,"resourceVersion":"12"},"status":body.get("status")})
         if self.path.endswith("/gpufleets/prod"):
-            FakeState.finalizer_patches += 1; return self._json(200,{"metadata":{"resourceVersion":"12","finalizers":body.get("metadata",{}).get("finalizers",[])}})
+            FakeState.finalizer_patches += 1; return self._json(200,{"metadata":{"name":"prod","uid":"u1","generation":1,"resourceVersion":"12","finalizers":body.get("metadata",{}).get("finalizers",[])}})
         if self.path.endswith("/leases/nvlx-controller"):
             return self._json(200,{"metadata":{"resourceVersion":"23"},"spec":body.get("spec")})
         return self._json(404,{"message":"not found"})
