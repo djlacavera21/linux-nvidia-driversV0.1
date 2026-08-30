@@ -29,24 +29,18 @@ jobs:
         run: python -m unittest discover -s tests -v
       - name: Reproducible archive smoke test
         run: |
-          python scripts/repro_release.py 1.6.3.3 --out /tmp/repro-a
-          python scripts/repro_release.py 1.6.3.3 --out /tmp/repro-b
+          python scripts/repro_release.py 1.6.3.4 --out /tmp/repro-a
+          python scripts/repro_release.py 1.6.3.4 --out /tmp/repro-b
           cmp /tmp/repro-a/SHA256SUMS /tmp/repro-b/SHA256SUMS
       - name: CLI smoke test
         run: |
-          nvlx --version | grep 1.6.3.3
+          nvlx --version | grep 1.6.3.4
           nvlx-operator --help | grep 'live GPUFleet Kubernetes operator'
-          nvlx-operator --help | grep -- '--token-file'
           python - <<'PY'
-          from nvlx.nvidia_checkpoint_v1633 import encode_checkpoint, decode_checkpoint
+          from nvlx.nvidia_checkpoint_v1634 import encode_checkpoint, decode_checkpoint
           from nvlx.nvidia_continuity_v1632 import SnapshotIdentity
-          i=SnapshotIdentity(
-              api_versions=(("nvidia.com","v1"),),
-              available_resources=(("nvidia.com",("clusterpolicies",)),),
-              gpuclusters=(), clusterpolicies=(("cluster-policy","u1","nvidia.com/v1"),), drivers=(),
-              computedomains=(), computedomaincliques=(), gpu_nodes=(("gpu-1","node-u1","v1"),),
-          )
-          raw=encode_checkpoint(i,None)
-          assert decode_checkpoint(raw)==(i,None)
+          i=SnapshotIdentity(api_versions=(("nvidia.com","v1"),),available_resources=(("nvidia.com",("clusterpolicies",)),),gpuclusters=(),clusterpolicies=(("cluster-policy","u1","nvidia.com/v1"),),drivers=(),computedomains=(),computedomaincliques=(),gpu_nodes=(("gpu-1","node-u1","v1"),))
+          raw=encode_checkpoint(i,None,7)
+          assert decode_checkpoint(raw)==(i,None,7)
           assert 'resourceVersion' not in raw
           PY

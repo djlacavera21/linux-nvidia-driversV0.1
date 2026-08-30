@@ -4,9 +4,9 @@ import argparse, os
 from pathlib import Path
 from .k8s_api_v16 import KubeClient
 from .lease_v16 import LeaseElector
-from .nvidia_checkpoint_v1633 import LeaseCheckpointStore
+from .nvidia_checkpoint_v1634 import LeaseCheckpointStore
 from .nvidia_inventory_v1631 import NvidiaInventory
-from .runtime_v1633 import Runtime
+from .runtime_v1634 import Runtime
 from .http_v16 import HealthServer
 
 def _read_token_file(path: str) -> str:
