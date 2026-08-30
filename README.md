@@ -1,46 +1,46 @@
-# nvlx: Linux-NVIDIA-Driver v1.6.5.6
+# nvlx: Linux-NVIDIA-Driver v1.6.5.7
 
-`nvlx` v1.6.5.6 hardens Prometheus exporter failure handling so schema or rendering faults produce a deterministic HTTP 500 response instead of escaping the request handler or emitting a partial scrape.
+`nvlx` v1.6.5.7 minimizes HTTP server fingerprinting by replacing Python's default `BaseHTTP/... Python/...` response header with a stable product-only `Server: nvlx` token across health, readiness, metrics, exporter-failure and unknown-path responses.
 
 > [!IMPORTANT]
 > NVIDIA driver/GPU Operator resources remain read-only. The operator still mutates only nvlx-owned GPUFleet status/finalizers plus its existing Lease and Events.
 
-## v1.6.5.6 Prometheus exporter fault containment
+## v1.6.5.7 HTTP server fingerprint minimization
 
-- **Renderer failures now fail closed over HTTP.** Exceptions raised while constructing `/metrics` are contained and returned as `500` with the static body `metrics unavailable`.
-- **No partial exposition is emitted.** The Prometheus body is rendered completely before any response bytes are written, so a failed render cannot leak a truncated HELP/TYPE/sample stream.
-- **Internal exception details are not exposed.** The failure body is fixed and does not include schema diagnostics, runtime state, checkpoint data, stack traces or exception text.
-- **Failure responses keep live-state transport guarantees.** The `500` response is `text/plain; charset=utf-8`, `Cache-Control: no-store`, and carries byte-accurate `Content-Length`.
-- **Successful metrics responses are unchanged.** `/metrics` still returns `200` with `text/plain; version=0.0.4; charset=utf-8`, no-store caching, exact framing and the existing schema-closed exposition.
-- **Readiness remains independent.** A metrics renderer failure does not alter `/readyz` status, readiness evaluation, Lease freshness, NVIDIA preflight or checkpoint readiness semantics.
-- **Schema closure remains authoritative.** Missing, extra, reordered or invalid metric metadata can still raise internally; v1.6.5.6 only makes that failure externally deterministic and bounded.
-- **HTTP framing remains intact.** v1.6.5.5 byte-accurate UTF-8 `Content-Length` behavior is preserved.
-- **Checkpoint semantics are unchanged.** Per-call receipts, ambiguity classification, reconciliation accounting, rollback fencing and Lease-epoch rules retain their established behavior.
-- **No RBAC expansion.** This release changes metrics error handling, tests, package metadata and documentation only.
+- **Python runtime details are no longer exposed in the Server header.** The HTTP handler now returns `Server: nvlx` instead of the `BaseHTTPRequestHandler` default that includes BaseHTTP and Python version information.
+- **The product token is deliberately versionless.** The response header identifies the service without disclosing the installed nvlx or interpreter version.
+- **All response classes are covered.** `/livez` `200`, `/readyz` `200` and `503`, `/metrics` `200`, exporter-failure `500`, and unknown-path `404` responses use the same minimized server fingerprint.
+- **Health and readiness semantics are unchanged.** Liveness, authoritative readiness evaluation, Lease freshness, NVIDIA preflight and checkpoint readiness behavior are untouched.
+- **Prometheus semantics are unchanged.** Successful `/metrics` responses retain schema-closed Prometheus text format 0.0.4 output.
+- **Exporter fault containment is unchanged.** Metrics renderer failures still return the static `metrics unavailable` `500` response without leaking exception details or partial exposition.
+- **HTTP cache and framing contracts are unchanged.** Live-state text responses retain `Cache-Control: no-store` and byte-accurate UTF-8 `Content-Length`; unknown-path `404` keeps its previous empty-body framing behavior.
+- **Checkpoint semantics are unchanged.** Per-call receipts, transport-ambiguity classification, reconciliation accounting, rollback fencing and Lease-epoch rules retain their established behavior.
+- **No RBAC expansion.** This release changes only HTTP identification metadata, regression coverage, package metadata and documentation.
 
-## Metrics failure contract
+## HTTP identification contract
 
-When the exporter succeeds, `/metrics` retains its established Prometheus 0.0.4 response. When the exporter raises an ordinary exception before exposition is available, nvlx now returns:
+All responses emitted by the nvlx health server now use:
 
-1. HTTP `500`;
-2. `Content-Type: text/plain; charset=utf-8`;
-3. `Cache-Control: no-store`;
-4. exact UTF-8 `Content-Length`;
-5. the fixed body `metrics unavailable\n`.
+`Server: nvlx`
 
-The underlying exception text is intentionally not copied into the HTTP response.
+The header intentionally omits:
+
+1. the Python interpreter version;
+2. the `BaseHTTP` implementation version;
+3. the installed nvlx package version.
+
+Existing status codes, response bodies, content types, cache policy and payload framing remain unchanged.
 
 ## Safety invariants
 
-1. Prometheus renderer failures never emit a partial exposition body.
-2. Renderer exception details and runtime/checkpoint state are not exposed in the failure response.
-3. Metrics failures do not change readiness or liveness behavior.
-4. Successful `/metrics` names, values, HELP/TYPE metadata, ordering and normalization remain unchanged.
-5. v1.6.5.5 byte-accurate HTTP framing remains unchanged.
-6. v1.6.5.4 no-store live-state caching remains unchanged.
-7. v1.6.5.3 metric-schema closure remains unchanged.
-8. v1.6.5.2 reconciliation telemetry remains unchanged.
-9. v1.6.5.1 transport-ambiguity classification remains unchanged.
-10. v1.6.5 per-call checkpoint receipt proof remains unchanged.
-11. No new Kubernetes mutation path or RBAC permission is introduced.
-12. NVIDIA driver/GPU Operator resources remain read-only in v1.6.5.6.
+1. HTTP responses do not expose `Python/` or `BaseHTTP` version fingerprints.
+2. The stable server identity is exactly `nvlx` across `200`, `503`, `500` and `404` response classes.
+3. v1.6.5.6 exporter fault containment remains unchanged.
+4. v1.6.5.5 byte-accurate HTTP framing remains unchanged.
+5. v1.6.5.4 no-store live-state caching remains unchanged.
+6. v1.6.5.3 metric-schema closure remains unchanged.
+7. v1.6.5.2 reconciliation telemetry remains unchanged.
+8. v1.6.5.1 transport-ambiguity classification remains unchanged.
+9. v1.6.5 per-call checkpoint receipt proof remains unchanged.
+10. No new Kubernetes mutation path or RBAC permission is introduced.
+11. NVIDIA driver/GPU Operator resources remain read-only in v1.6.5.7.

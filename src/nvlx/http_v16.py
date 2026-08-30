@@ -124,6 +124,10 @@ class HealthServer:
         outer = self
 
         class Handler(BaseHTTPRequestHandler):
+            def version_string(self) -> str:
+                """Expose a stable product token without BaseHTTP or Python version details."""
+                return "nvlx"
+
             def _send_text(
                 self,
                 status: int,
