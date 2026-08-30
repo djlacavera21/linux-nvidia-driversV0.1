@@ -68,7 +68,6 @@ def _leadership_fresh_observation(
     verified = getattr(runtime, "_leader_verified_monotonic", None)
     window = getattr(runtime, "leader_fresh_seconds", None)
     if verified is None or window is None:
-        # Compatibility for runtimes that predate timestamped Lease freshness.
         return leader
 
     try:
@@ -84,17 +83,12 @@ def _readiness_snapshot(runtime, stats) -> ReadinessSnapshot:
     """Evaluate authoritative readiness and capture one coherent post-evaluation gate state."""
     ready_fn = getattr(runtime, "ready", None)
     if callable(ready_fn):
-        # Runtime readiness may refresh or invalidate cached leadership. Run it
-        # before sampling mutable gate state so diagnostics reflect the result.
         controller_ready = _runtime_ready(runtime, stats)
         api_reachable = bool(getattr(stats, "api_reachable", False))
         leader = bool(getattr(stats, "leader", False))
         inventory_fresh = bool(getattr(stats, "inventory_fresh", False))
         terminating = bool(getattr(stats, "terminating", False))
     else:
-        # Legacy runtimes have no side-effectful readiness hook. Capture their
-        # generic gates once and compute the compatibility readiness result from
-        # those same values rather than rereading mutable stats.
         api_reachable = bool(getattr(stats, "api_reachable", False))
         leader = bool(getattr(stats, "leader", False))
         inventory_fresh = bool(getattr(stats, "inventory_fresh", False))
@@ -162,6 +156,9 @@ class HealthServer:
                         terminating=snapshot.terminating,
                         checkpoint_writes=getattr(runtime, "nvidia_checkpoint_writes", 0),
                         checkpoint_idempotent_acks=getattr(runtime, "nvidia_checkpoint_idempotent_acks", 0),
+                        checkpoint_reconciled_commits=getattr(
+                            runtime, "nvidia_checkpoint_reconciled_commits", 0
+                        ),
                         checkpoint_rollbacks=getattr(runtime, "nvidia_checkpoint_rollbacks", 0),
                         checkpoint_transaction_mismatches=getattr(
                             runtime, "nvidia_checkpoint_transaction_mismatches", 0
