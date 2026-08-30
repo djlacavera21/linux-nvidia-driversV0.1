@@ -14,7 +14,11 @@ class HealthServer:
                 if self.path=="/livez":
                     self.send_response(200); self.end_headers(); self.wfile.write(b"ok\n"); return
                 if self.path=="/readyz":
-                    ready=s.api_reachable and s.leader and s.inventory_fresh and not s.terminating
+                    ready_fn=getattr(outer.runtime,"ready",None)
+                    try:
+                        ready=bool(ready_fn()) if callable(ready_fn) else bool(s.api_reachable and s.leader and s.inventory_fresh and not s.terminating)
+                    except Exception:
+                        ready=False
                     self.send_response(200 if ready else 503); self.end_headers(); self.wfile.write(("ready\n" if ready else "not ready\n").encode()); return
                 if self.path=="/metrics":
                     body=render_metrics(leader=s.leader,reconcile_total=s.reconcile_total,reconcile_failures=s.reconcile_failures,pending_approvals=0,rollback_required=0)

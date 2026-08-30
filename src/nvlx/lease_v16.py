@@ -5,10 +5,14 @@ from urllib import parse
 from .k8s_api_v16 import KubeClient, ApiError, ApiResponse
 
 class LeaseElector:
-    def __init__(self, client: KubeClient, identity: str, *, namespace="nvlx-system", name="nvlx-controller", duration_seconds=30):
-        if not identity.strip(): raise ValueError("identity required")
-        if isinstance(duration_seconds,bool) or duration_seconds < 10: raise ValueError("lease duration must be >= 10 seconds")
+    def __init__(self, client: KubeClient, identity: str, *, namespace="nvlx-system", name="nvlx-controller", duration_seconds=30, max_clock_skew_seconds=5):
+        if not isinstance(identity,str) or not identity.strip(): raise ValueError("identity required")
+        if isinstance(duration_seconds,bool) or not isinstance(duration_seconds,int) or duration_seconds < 10:
+            raise ValueError("lease duration must be an integer >= 10 seconds")
+        if isinstance(max_clock_skew_seconds,bool) or not isinstance(max_clock_skew_seconds,int) or max_clock_skew_seconds < 0:
+            raise ValueError("max_clock_skew_seconds must be a non-negative integer")
         self.client=client; self.identity=identity; self.namespace=namespace; self.name=name; self.duration=duration_seconds
+        self.max_clock_skew_seconds=max_clock_skew_seconds
 
     @property
     def path(self):
@@ -20,15 +24,20 @@ class LeaseElector:
     def _stamp(dt): return dt.isoformat().replace("+00:00","Z")
 
     def _fresh(self, spec: dict, now) -> bool:
-        if not isinstance(spec,dict): return False
+        if not isinstance(spec,dict) or not isinstance(now,datetime) or now.tzinfo is None: return False
         stamp=spec.get("renewTime") or spec.get("acquireTime")
         if not isinstance(stamp,str) or not stamp: return False
         try:
             then=datetime.fromisoformat(stamp.replace("Z","+00:00"))
             duration=int(spec.get("leaseDurationSeconds") or self.duration)
-        except (ValueError,TypeError): return False
-        if duration <= 0: return False
-        return (now-then).total_seconds() < duration
+        except (ValueError,TypeError,OverflowError): return False
+        if then.tzinfo is None or duration <= 0: return False
+        try:
+            future_skew=(then-now).total_seconds()
+            age=(now-then).total_seconds()
+        except (TypeError,OverflowError): return False
+        if future_skew > self.max_clock_skew_seconds: return False
+        return age < duration
 
     def _verified_ours(self, response: ApiResponse | None) -> bool:
         if response is None or not isinstance(response.body,dict): return False
@@ -39,8 +48,9 @@ class LeaseElector:
         if spec.get("holderIdentity") != self.identity: return False
         try:
             if int(spec.get("leaseDurationSeconds")) != self.duration: return False
-            int(spec.get("leaseTransitions") or 0)
+            transitions=int(spec.get("leaseTransitions") or 0)
         except (TypeError,ValueError): return False
+        if transitions < 0: return False
         return self._fresh(spec,self._now())
 
     def ensure_leader(self) -> bool:
