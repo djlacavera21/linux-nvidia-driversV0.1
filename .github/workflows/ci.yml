@@ -29,21 +29,22 @@ jobs:
         run: python -m unittest discover -s tests -v
       - name: Reproducible archive smoke test
         run: |
-          python scripts/repro_release.py 1.6.1.3 --out /tmp/repro-a
-          python scripts/repro_release.py 1.6.1.3 --out /tmp/repro-b
+          python scripts/repro_release.py 1.6.1.4 --out /tmp/repro-a
+          python scripts/repro_release.py 1.6.1.4 --out /tmp/repro-b
           cmp /tmp/repro-a/SHA256SUMS /tmp/repro-b/SHA256SUMS
       - name: CLI smoke test
         run: |
-          nvlx --version | grep 1.6.1.3
+          nvlx --version | grep 1.6.1.4
           nvlx-operator --help | grep 'live GPUFleet Kubernetes operator'
           python - <<'PY'
           from nvlx.k8s_api_v16 import ApiResponse
-          from nvlx.runtime_v16 import Runtime, PROTECTIVE_FINALIZER
-          good={'name':'prod','uid':'u1','resourceVersion':'11','generation':4}
-          same,rv=Runtime._conflict_refetch_matches({'metadata':good},{'name':'prod','uid':'u1','generation':4})
-          assert same and rv == '11'
-          changed=dict(good); changed['generation']=5
-          assert Runtime._conflict_refetch_matches({'metadata':changed},{'name':'prod','uid':'u1','generation':4})[0] is False
-          assert Runtime._status_response_verified(ApiResponse(200,{'metadata':{'name':'prod','resourceVersion':'12'},'status':{'phase':'Ready'}}),'prod',{'phase':'Ready'})
-          assert not Runtime._finalizer_response_verified(ApiResponse(200,{'metadata':{'name':'prod','resourceVersion':'12','finalizers':[PROTECTIVE_FINALIZER]}}),'prod')
+          from nvlx.runtime_v16 import Runtime
+          meta={'name':'prod','uid':'u1','generation':4}
+          ok=ApiResponse(200,{'metadata':{'name':'prod','uid':'u1','generation':4,'resourceVersion':'12'},'status':{'phase':'Ready'}})
+          bad=ApiResponse(200,{'metadata':{'name':'prod','uid':'u2','generation':4,'resourceVersion':'12'},'status':{'phase':'Ready'}})
+          assert Runtime._status_response_verified(ok,meta,{'phase':'Ready'})
+          assert not Runtime._status_response_verified(bad,meta,{'phase':'Ready'})
+          final=ApiResponse(200,{'metadata':{'name':'prod','resourceVersion':'13','finalizers':['other.example/finalizer']}})
+          assert Runtime._finalizer_response_verified(final,'prod',['other.example/finalizer'])
+          assert not Runtime._finalizer_response_verified(final,'prod',[])
           PY
