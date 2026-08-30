@@ -1,24 +1,26 @@
-# nvlx: Linux-NVIDIA-Driver v1.6.6.6.6.6.6.6
+# nvlx: Linux-NVIDIA-Driver v1.6.6.6.6.6.6.6.1
 
-`nvlx` v1.6.6.6.6.6.6.6 adds obsolete folded request-header (`obs-fold`) containment to the live HTTP surface. After the existing body-framing, request-version, Host, and canonical request-target gates succeed, the server now rejects any raw request-header continuation line beginning with space or tab. This prevents intermediary/parser disagreement over deprecated multiline header syntax before endpoint or runtime evaluation.
+`nvlx` v1.6.6.6.6.6.6.6.1 adds strict request-header field-name containment to the live HTTP surface. After the existing body-framing, request-version, Host, canonical request-target, and obsolete-folding gates succeed, each physical header-field start must now contain a non-empty ASCII HTTP token-style name immediately followed by `:`. Malformed names terminate through the existing canonical `400 Request Rejected` path before endpoint or runtime evaluation.
 
 > [!IMPORTANT]
 > NVIDIA driver/GPU Operator resources remain read-only. The operator still mutates only nvlx-owned GPUFleet status/finalizers plus its existing Lease and Events.
 
-## v1.6.6.6.6.6.6.6 obsolete folded-header containment
+## v1.6.6.6.6.6.6.6.1 request-header field-name containment
 
-- **Obsolete header folding is rejected for every request header.** Any physical header continuation line beginning with SP or HTAB terminates through the canonical `400 Request Rejected` path.
-- **Detection happens on raw header lines.** The new tracking reader observes continuation syntax before parsed header values can normalize or reinterpret it.
-- **Normal inline whitespace remains compatible.** Horizontal tabs or spaces inside an ordinary header field value are not treated as continuation lines by this release.
-- **HTTP/1.0 and HTTP/1.1 are covered.** The fold prohibition applies consistently after the existing exact request-version admission gate.
-- **Existing Host containment keeps precedence.** Folded or otherwise ambiguous Host fields may still fail through the earlier HTTP/1.1 Host gate; generic folded headers are caught by the new final parser gate.
-- **Body-framing and target gates keep precedence.** Invalid `Transfer-Encoding`/`Content-Length`, unsupported request versions, invalid HTTP/1.1 Host framing, and non-canonical request targets continue to fail closed before endpoint dispatch.
+- **Header names must be non-empty HTTP token names.** ASCII letters, digits, and the standard token punctuation ``!#$%&'*+-.^_`|~`` are admitted before the first colon.
+- **Whitespace before the colon is rejected.** Spellings such as `X-Test : value` cannot be silently dropped or normalized by the Python header parser.
+- **Non-token punctuation is rejected.** Names such as `Bad@Name` are terminated even if a parser would otherwise accept them.
+- **Empty and colonless field starts are rejected.** `: value` and `NoColon` cannot pass through as ignored parser defects.
+- **Raw non-ASCII field-name bytes are rejected.** Header field names on this live surface are strictly ASCII token syntax.
+- **Field values are not redefined by this release.** This increment intentionally isolates field-name grammar; value-octet policy remains a separate hardening concern.
+- **Obsolete folding keeps precedence.** SP/HTAB-prefixed continuation lines remain owned by the inherited v1.6.6.6.6.6.6.6 `obs-fold` gate rather than being reclassified as malformed names.
+- **HTTP/1.0 and HTTP/1.1 are covered.** Name syntax is enforced consistently after the exact request-version gate.
 - **HEAD rejection remains bodyless.** Representation `Content-Length` is preserved without emitting the rejection body.
-- **Fold rejection is terminal.** `Connection: close` prevents trailing bytes from becoming a second pipelined request.
-- **Runtime/endpoint evaluation remains isolated.** Rejected folded headers cannot invoke readiness or metrics diagnosis.
-- **Admission capacity recovers normally.** Fold rejection releases its bounded worker slot.
+- **Field-name rejection is terminal.** `Connection: close` prevents trailing bytes from becoming a second pipelined request.
+- **Runtime/endpoint evaluation remains isolated.** Malformed generic header names cannot invoke readiness or metrics diagnosis.
+- **Admission capacity recovers normally.** Rejection releases its bounded worker slot.
 - **Existing ingress defenses remain intact.** The 8 KiB request-line budget, 32 KiB aggregate header budget, 32-field header cap, 5-second idle timeout, 5-second absolute header deadline, and 32-request admission cap are unchanged.
-- **The live operator now uses `http_v16666666`.** The live runtime remains `runtime_v1664`.
+- **The live operator now uses `http_v166666661`.** The live runtime remains `runtime_v1664`.
 - **Checkpoint persistence, Prometheus schema, RBAC, readiness policy, and NVIDIA mutation behavior are unchanged.**
 
 ## Ingress resource model
@@ -32,7 +34,7 @@ The live server retains six independent quantitative ingress bounds:
 5. `max_request_header_bytes` — aggregate request-header byte budget, default 32768 bytes.
 6. `max_request_header_fields` — request-header field-count budget, default 32 fields.
 
-The quantitative budgets remain independent. Protocol invariants are enforced in a fail-closed chain: bodyless framing, exact HTTP/1.0 or HTTP/1.1 request version, HTTP/1.1 singleton Host framing, canonical origin-form request-target containment, then rejection of obsolete folded header lines.
+The quantitative budgets remain independent. Protocol invariants are enforced in a fail-closed chain: bodyless framing, exact HTTP/1.0 or HTTP/1.1 request version, HTTP/1.1 singleton Host framing, canonical origin-form request-target containment, obsolete folded-header rejection, then strict request-header field-name grammar.
 
 ## Safety invariants
 
@@ -41,13 +43,14 @@ The quantitative budgets remain independent. Protocol invariants are enforced in
 3. HTTP/1.1 requests require exactly one non-empty, non-folded, non-list-like Host field.
 4. The raw request target must survive parsing unchanged and begin with exactly one `/`.
 5. Absolute-form, authority-form, asterisk-form, fragments, backslashes, controls, and raw non-ASCII target bytes are rejected.
-6. Any raw request-header continuation line beginning with SP or HTAB is rejected.
-7. Fold rejection uses canonical terminal `400 Request Rejected` framing with `Connection: close`.
-8. HEAD rejection remains bodyless while preserving representation `Content-Length`.
-9. Rejected requests cannot process trailing pipelined bytes on the same connection.
-10. Rejection releases bounded worker capacity.
-11. Header field-count, aggregate header bytes, and request-line byte budgets remain independently enforced.
-12. Silent and byte-trickle partial requests remain bounded by the inherited idle timeout and absolute parse deadline.
-13. Existing client-abort, parser-error, logging, response-body, resource, and method containment remains unchanged.
-14. All v1.6.5.x checkpoint receipt, reconciliation, and persistence semantics remain unchanged.
-15. NVIDIA driver/GPU Operator resources remain read-only in v1.6.6.6.6.6.6.6.
+6. Any raw request-header continuation line beginning with SP or HTAB is rejected by the inherited obs-fold gate.
+7. Every physical header-field start must have a non-empty ASCII token-style name immediately followed by `:`.
+8. Malformed field-name rejection uses canonical terminal `400 Request Rejected` framing with `Connection: close`.
+9. HEAD rejection remains bodyless while preserving representation `Content-Length`.
+10. Rejected requests cannot process trailing pipelined bytes on the same connection.
+11. Rejection releases bounded worker capacity.
+12. Header field-count, aggregate header bytes, and request-line byte budgets remain independently enforced.
+13. Silent and byte-trickle partial requests remain bounded by the inherited idle timeout and absolute parse deadline.
+14. Existing client-abort, parser-error, logging, response-body, resource, and method containment remains unchanged.
+15. All v1.6.5.x checkpoint receipt, reconciliation, and persistence semantics remain unchanged.
+16. NVIDIA driver/GPU Operator resources remain read-only in v1.6.6.6.6.6.6.6.1.
