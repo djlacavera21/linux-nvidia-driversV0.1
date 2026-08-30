@@ -10,7 +10,7 @@ class EventClient:
         self.events=0
     def patch_status(self,name,rv,status):
         self.patches += 1
-        return ApiResponse(200,{"metadata":{"name":name,"resourceVersion":"11"},"status":status},"11")
+        return ApiResponse(200,{"metadata":{"name":name,"uid":"u1","generation":1,"resourceVersion":"11"},"status":status},"11")
     def create_event(self,*args,**kwargs):
         self.events += 1
         return ApiResponse(201,{"metadata":{"resourceVersion":"1"}},"1")
