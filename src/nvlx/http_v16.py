@@ -139,9 +139,11 @@ class HealthServer:
                         checkpoint_ready=snapshot.checkpoint_ready,
                     )
                     self.send_response(200)
-                    self.send_header("Content-Type", "text/plain; version=0.0.4")
+                    self.send_header(
+                        "Content-Type", "text/plain; version=0.0.4; charset=utf-8"
+                    )
                     self.end_headers()
-                    self.wfile.write(body.encode())
+                    self.wfile.write(body.encode("utf-8"))
                     return
                 self.send_response(404)
                 self.end_headers()

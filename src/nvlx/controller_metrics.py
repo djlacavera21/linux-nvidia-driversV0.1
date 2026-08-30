@@ -15,6 +15,35 @@ _COUNTER_METRICS = {
     "nvlx_nvidia_checkpoint_restore_successes_total",
 }
 
+_METRIC_HELP = {
+    "nvlx_controller_leader": "Whether this controller currently holds effective leadership.",
+    "nvlx_controller_ready": "Whether the controller's complete readiness contract currently passes.",
+    "nvlx_controller_api_reachable": "Whether the Kubernetes API is currently reachable.",
+    "nvlx_controller_leadership_fresh": "Whether the current Lease leadership proof is still fresh.",
+    "nvlx_controller_inventory_fresh": "Whether controller inventory continuity is currently fresh.",
+    "nvlx_controller_terminating": "Whether the controller is intentionally terminating.",
+    "nvlx_nvidia_preflight_ready": "Whether NVIDIA inventory and preflight validation currently pass.",
+    "nvlx_controller_reconcile_total": "Total controller reconcile attempts observed by this process.",
+    "nvlx_controller_reconcile_failures_total": "Total controller reconcile failures observed by this process.",
+    "nvlx_controller_pending_approvals": "Current number of pending controller approvals.",
+    "nvlx_controller_rollback_required": "Current number of controller rollback requirements.",
+    "nvlx_controller_circuit_open": "Whether the controller circuit breaker is currently open.",
+    "nvlx_controller_rollout_slots": "Current number of rollout slots available to the controller.",
+    "nvlx_controller_completed_executions": "Current count of completed controller executions retained in runtime state.",
+    "nvlx_controller_preflight_stale_total": "Total stale controller preflight observations.",
+    "nvlx_controller_canary_wave": "Current controller canary rollout wave.",
+    "nvlx_nvidia_checkpoint_writes_total": "Total successful NVIDIA continuity checkpoint writes.",
+    "nvlx_nvidia_checkpoint_idempotent_acks_total": "Total proven idempotent NVIDIA checkpoint acknowledgements.",
+    "nvlx_nvidia_checkpoint_rollbacks_total": "Total NVIDIA checkpoint sequence rollback detections.",
+    "nvlx_nvidia_checkpoint_transaction_mismatches_total": "Total NVIDIA checkpoint transaction state mismatches.",
+    "nvlx_nvidia_checkpoint_failures_total": "Total NVIDIA continuity checkpoint persistence failures.",
+    "nvlx_nvidia_checkpoint_restore_attempts_total": "Total NVIDIA continuity checkpoint restore attempts.",
+    "nvlx_nvidia_checkpoint_restore_successes_total": "Total successful NVIDIA continuity checkpoint restores.",
+    "nvlx_nvidia_checkpoint_sequence": "Current accepted NVIDIA continuity checkpoint sequence.",
+    "nvlx_nvidia_checkpoint_epoch": "Current accepted NVIDIA continuity checkpoint Lease transition epoch.",
+    "nvlx_nvidia_checkpoint_ready": "Whether the NVIDIA continuity checkpoint readiness gate currently passes.",
+}
+
 
 def _nonnegative(value: int) -> int:
     try:
@@ -85,6 +114,8 @@ def render(
         "nvlx_nvidia_checkpoint_ready": 1 if checkpoint_ready else 0,
     }
     return "".join(
-        f"# TYPE {name} {_metric_type(name)}\n{name} {value}\n"
+        f"# HELP {name} {_METRIC_HELP[name]}\n"
+        f"# TYPE {name} {_metric_type(name)}\n"
+        f"{name} {value}\n"
         for name, value in vals.items()
     )
