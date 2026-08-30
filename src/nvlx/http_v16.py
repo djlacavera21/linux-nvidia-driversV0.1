@@ -11,6 +11,7 @@ from .controller_metrics import render as render_metrics
 class ReadinessSnapshot:
     controller_ready: bool
     api_reachable: bool
+    leader: bool
     leadership_fresh: bool
     inventory_fresh: bool
     nvidia_preflight_ready: bool
@@ -43,18 +44,32 @@ def _checkpoint_ready(runtime) -> bool:
         return False
 
 
-def _leadership_fresh_observation(runtime, stats) -> bool:
-    """Observe Lease freshness without invoking the runtime's mutating fail-closed hook."""
-    if not getattr(stats, "api_reachable", False):
+def _leadership_fresh_observation(
+    runtime,
+    stats,
+    *,
+    api_reachable: bool | None = None,
+    leader: bool | None = None,
+    terminating: bool | None = None,
+) -> bool:
+    """Observe Lease freshness from one captured gate state without mutating runtime state."""
+    if api_reachable is None:
+        api_reachable = bool(getattr(stats, "api_reachable", False))
+    if leader is None:
+        leader = bool(getattr(stats, "leader", False))
+    if terminating is None:
+        terminating = bool(getattr(stats, "terminating", False))
+
+    if not api_reachable:
         return False
-    if getattr(stats, "terminating", False) or not getattr(stats, "leader", False):
+    if terminating or not leader:
         return False
 
     verified = getattr(runtime, "_leader_verified_monotonic", None)
     window = getattr(runtime, "leader_fresh_seconds", None)
     if verified is None or window is None:
         # Compatibility for runtimes that predate timestamped Lease freshness.
-        return bool(getattr(stats, "leader", False))
+        return leader
 
     try:
         verified = float(verified)
@@ -66,21 +81,41 @@ def _leadership_fresh_observation(runtime, stats) -> bool:
 
 
 def _readiness_snapshot(runtime, stats) -> ReadinessSnapshot:
-    """Evaluate authoritative readiness first, then observe the resulting gate state."""
-    # Runtime readiness is allowed to refresh or invalidate cached leadership and
-    # other fail-closed state. Evaluate it first so a single HTTP response never
-    # mixes diagnostic observations from before that transition with controller
-    # state from after it.
-    controller_ready = _runtime_ready(runtime, stats)
-    api_reachable = bool(getattr(stats, "api_reachable", False))
-    inventory_fresh = bool(getattr(stats, "inventory_fresh", False))
-    terminating = bool(getattr(stats, "terminating", False))
+    """Evaluate authoritative readiness and capture one coherent post-evaluation gate state."""
+    ready_fn = getattr(runtime, "ready", None)
+    if callable(ready_fn):
+        # Runtime readiness may refresh or invalidate cached leadership. Run it
+        # before sampling mutable gate state so diagnostics reflect the result.
+        controller_ready = _runtime_ready(runtime, stats)
+        api_reachable = bool(getattr(stats, "api_reachable", False))
+        leader = bool(getattr(stats, "leader", False))
+        inventory_fresh = bool(getattr(stats, "inventory_fresh", False))
+        terminating = bool(getattr(stats, "terminating", False))
+    else:
+        # Legacy runtimes have no side-effectful readiness hook. Capture their
+        # generic gates once and compute the compatibility readiness result from
+        # those same values rather than rereading mutable stats.
+        api_reachable = bool(getattr(stats, "api_reachable", False))
+        leader = bool(getattr(stats, "leader", False))
+        inventory_fresh = bool(getattr(stats, "inventory_fresh", False))
+        terminating = bool(getattr(stats, "terminating", False))
+        controller_ready = bool(
+            api_reachable and leader and inventory_fresh and not terminating
+        )
+
     nvidia_preflight_ready = bool(getattr(runtime, "nvidia_preflight_ok", True))
-    leadership_fresh = _leadership_fresh_observation(runtime, stats)
+    leadership_fresh = _leadership_fresh_observation(
+        runtime,
+        stats,
+        api_reachable=api_reachable,
+        leader=leader,
+        terminating=terminating,
+    )
     checkpoint_ready = _checkpoint_ready(runtime)
     return ReadinessSnapshot(
         controller_ready=controller_ready,
         api_reachable=api_reachable,
+        leader=leader,
         leadership_fresh=leadership_fresh,
         inventory_fresh=inventory_fresh,
         nvidia_preflight_ready=nvidia_preflight_ready,
@@ -114,7 +149,7 @@ class HealthServer:
                 if self.path == "/metrics":
                     snapshot = _readiness_snapshot(runtime, s)
                     body = render_metrics(
-                        leader=s.leader,
+                        leader=snapshot.leader,
                         reconcile_total=s.reconcile_total,
                         reconcile_failures=s.reconcile_failures,
                         pending_approvals=0,
