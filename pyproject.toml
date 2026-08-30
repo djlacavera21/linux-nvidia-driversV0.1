@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "nvlx"
-version = "1.6.6.6.6"
-description = "Real Kubernetes NVIDIA GPU fleet operator with bodyless live GET/HEAD contracts, terminal resource-aware HTTP rejection, typed readiness propagation and checkpoint reconciliation safety"
+version = "1.6.6.6.6.1"
+description = "Real Kubernetes NVIDIA GPU fleet operator with canonical bodyless live GET/HEAD framing, terminal resource-aware HTTP rejection, typed readiness propagation and checkpoint reconciliation safety"
 readme = "README.md"
 requires-python = ">=3.11"
 license = {text = "MIT"}
