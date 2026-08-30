@@ -4,7 +4,7 @@ import argparse, os
 from pathlib import Path
 from .k8s_api_v16 import KubeClient
 from .lease_v16 import LeaseElector
-from .nvidia_inventory_v163 import NvidiaInventory
+from .nvidia_inventory_v1631 import NvidiaInventory
 from .runtime_v163 import Runtime
 from .http_v16 import HealthServer
 
