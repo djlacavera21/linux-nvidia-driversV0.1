@@ -9,6 +9,8 @@ from .nvidia_inventory_v1631 import NvidiaInventoryError
 class LeaseCheckpointStore(LeaseCheckpointStoreV1637):
     """Recover an already-committed identical checkpoint without rewriting it."""
 
+    proves_idempotent_commits = True
+
     def _matching_current_commit(self, baseline, candidate):
         try:
             response = self.client.request_json("GET", self.path)
