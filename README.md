@@ -1,29 +1,30 @@
-# nvlx: Linux-NVIDIA-Driver v1.6.2.3
+# nvlx: Linux-NVIDIA-Driver v1.6.2.4
 
-`nvlx` v1.6.2.3 is a narrow post-1.6.2.2 runtime-safety hotfix. It preserves the Kubernetes API surface and NVIDIA read-only boundary while making GPUFleet inventory freshness an explicit list/watch continuity proof rather than a sticky flag from an older snapshot.
+`nvlx` v1.6.2.4 is a narrow post-1.6.2.3 runtime-safety hotfix. It preserves the Kubernetes API surface and NVIDIA read-only boundary while making malformed state-bearing watch content fail closed by forcing a trusted relist instead of silently continuing with stale inventory assumptions.
 
 > [!IMPORTANT]
-> NVIDIA resource changes remain read-only in v1.6.2.3. The operator mutates only nvlx-owned GPUFleet status/finalizers plus its Lease and Events; driver/GPU Operator mutation remains deferred.
+> NVIDIA resource changes remain read-only in v1.6.2.4. The operator mutates only nvlx-owned GPUFleet status/finalizers plus its Lease and Events; driver/GPU Operator mutation remains deferred.
 
-## v1.6.2.3 hotfixes
+## v1.6.2.4 hotfixes
 
-- **Inventory freshness invalidation.** A reusable runtime layer clears `stats.inventory_fresh` whenever list/watch continuity ends or a replacement snapshot cannot be proven valid.
-- **Relist starts stale.** Beginning a new list/relist immediately invalidates the previous inventory proof; only a fully validated replacement list may set inventory fresh again.
-- **EOF fencing.** A clean watch EOF ends continuity for the preceding snapshot and therefore clears inventory freshness before reconnect/backoff.
-- **Relist/reconnect fencing.** `410` relist signals, transient reconnects and non-retryable watch errors all invalidate the prior inventory proof before returning to the outer loop.
-- **Malformed-list fencing.** A malformed replacement list cannot inherit `inventory_fresh=True` from an older successful snapshot.
-- **Shutdown cleanup.** Operator shutdown clears inventory freshness together with leadership state.
-- **Proof separation.** Lease leadership and inventory continuity remain separate proofs: a valid Lease may remain locally fresh across a non-transport relist signal, but readiness stays false until a new inventory snapshot is validated.
-- **Prior safeguards retained.** Immediate leadership invalidation on API loss, Lease clock-skew fencing, timezone-aware Lease freshness, 20-second Kubernetes watch lifetime, 25-second watch socket timeout, conflict-safe status/finalizer recomputation, UID-bound mutation verification, token-file auth, opaque resourceVersion semantics and verified Lease writes remain active.
+- **Watch corruption relist.** Malformed raw watch deliveries now invalidate GPUFleet inventory freshness and force a relist rather than being ignored while the prior snapshot remains trusted.
+- **Malformed state-object fencing.** ADDED, MODIFIED, and DELETED events with invalid GPUFleet identity metadata force a relist and cannot advance the watch cursor or enter reconciliation.
+- **Cursor preservation.** Corrupt state-bearing watch content cannot advance `last_resource_version`; the runtime rebuilds from a fresh list snapshot instead.
+- **Unknown-event compatibility.** Unknown future watch event types remain ignorable so forward-compatible server extensions do not automatically trigger relist churn.
+- **BOOKMARK boundary retained.** Malformed BOOKMARK metadata remains non-fatal and cannot replace the existing cursor because BOOKMARK carries no GPUFleet object-state mutation.
+- **Inventory continuity retained.** Clean EOF, 410 relist, reconnect, watch errors, exceptions, malformed replacement lists, and shutdown continue to clear `inventory_fresh`.
+- **Leadership proof separation retained.** Lease freshness remains independent from inventory continuity; readiness requires both proofs.
+- **Prior safeguards retained.** Immediate leadership invalidation on API loss, Lease clock-skew fencing, timezone-aware Lease freshness, 20-second Kubernetes watch lifetime, 25-second watch socket timeout, conflict-safe status/finalizer recomputation, UID-bound mutation verification, token-file auth, opaque resourceVersion semantics, bounded watch cache, and verified Lease writes remain active.
 
 ## Safety invariants
 
-1. `inventory_fresh` represents an active validated list/watch continuity window, not merely a previously successful list.
-2. Starting a relist clears the previous inventory proof before the replacement list is fetched and validated.
-3. EOF, reconnect, relist and watch-error outcomes cannot leave stale inventory marked fresh during backoff.
-4. A malformed or failed replacement list cannot reuse an older inventory-fresh state.
-5. Leadership freshness and inventory freshness are independent readiness requirements.
-6. Kubernetes `resourceVersion` remains opaque and is never numerically or lexically ordered.
-7. Conflict retries remain bounded and leadership-fenced.
-8. NVIDIA resources remain read-only in v1.6.2.3.
-9. All v0.1-v1.6.2.2 approval, rollback, Secure Boot, DRA, fabric, health/SLO, PSIRT, quarantine, audit, SBOM, provenance, fencing, replay, UID-integrity and Lease-CAS safeguards remain in force.
+1. Malformed state-bearing watch content cannot be ignored while inventory remains trusted.
+2. A malformed ADDED, MODIFIED, or DELETED object forces a full relist before readiness can become true again.
+3. Corrupt watch content cannot advance the stored watch cursor.
+4. Unknown future event types remain forward-compatible and are not treated as corruption by default.
+5. Malformed BOOKMARK metadata cannot poison the cursor and does not imply lost object state.
+6. `inventory_fresh` still represents an active validated list/watch continuity window.
+7. Kubernetes `resourceVersion` remains opaque and is never numerically or lexically ordered.
+8. Conflict retries remain bounded and leadership-fenced.
+9. NVIDIA resources remain read-only in v1.6.2.4.
+10. All v0.1-v1.6.2.3 approval, rollback, Secure Boot, DRA, fabric, health/SLO, PSIRT, quarantine, audit, SBOM, provenance, fencing, replay, UID-integrity, Lease-CAS, leadership-freshness and inventory-continuity safeguards remain in force.
