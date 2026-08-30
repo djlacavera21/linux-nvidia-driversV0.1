@@ -32,6 +32,13 @@ class HealthServer:
                     return
                 if self.path == "/metrics":
                     runtime = outer.runtime
+                    checkpoint_ready_fn = getattr(runtime, "_checkpoint_ready", None)
+                    try:
+                        checkpoint_ready = (
+                            bool(checkpoint_ready_fn()) if callable(checkpoint_ready_fn) else True
+                        )
+                    except Exception:
+                        checkpoint_ready = False
                     body = render_metrics(
                         leader=s.leader,
                         reconcile_total=s.reconcile_total,
@@ -53,6 +60,7 @@ class HealthServer:
                         ),
                         checkpoint_sequence=getattr(runtime, "nvidia_checkpoint_sequence", 0),
                         checkpoint_epoch=getattr(runtime, "nvidia_checkpoint_epoch", 0),
+                        checkpoint_ready=checkpoint_ready,
                     )
                     self.send_response(200)
                     self.send_header("Content-Type", "text/plain; version=0.0.4")

@@ -30,6 +30,7 @@ def render(
     checkpoint_restore_successes: int = 0,
     checkpoint_sequence: int = 0,
     checkpoint_epoch: int = 0,
+    checkpoint_ready: bool = True,
 ) -> str:
     vals = {
         "nvlx_controller_leader": 1 if leader else 0,
@@ -51,5 +52,6 @@ def render(
         "nvlx_nvidia_checkpoint_restore_successes_total": _nonnegative(checkpoint_restore_successes),
         "nvlx_nvidia_checkpoint_sequence": _nonnegative(checkpoint_sequence),
         "nvlx_nvidia_checkpoint_epoch": _nonnegative(checkpoint_epoch),
+        "nvlx_nvidia_checkpoint_ready": 1 if checkpoint_ready else 0,
     }
     return "".join(f"# TYPE {k} gauge\n{k} {v}\n" for k, v in vals.items())

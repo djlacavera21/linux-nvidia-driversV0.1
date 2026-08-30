@@ -1,40 +1,29 @@
-# nvlx: Linux-NVIDIA-Driver v1.6.4.1
+# nvlx: Linux-NVIDIA-Driver v1.6.4.2
 
-`nvlx` v1.6.4.1 exposes the unified NVIDIA checkpoint transaction state added across v1.6.3.5-v1.6.4 through the controller's Prometheus `/metrics` endpoint.
+`nvlx` v1.6.4.2 makes Kubernetes readiness checkpoint-aware so the controller cannot advertise `/readyz` while persisted NVIDIA continuity state is still un-restored or stale for the active Lease epoch.
 
 > [!IMPORTANT]
 > NVIDIA driver/GPU Operator resources remain read-only. The operator still mutates only nvlx-owned GPUFleet status/finalizers plus its existing Lease and Events.
 
-## v1.6.4.1 checkpoint telemetry integration
+## v1.6.4.2 checkpoint-aware readiness
 
-- **Unified checkpoint metrics are now exported.** `/metrics` exposes successful writes, proven idempotent acknowledgements, rollback detections, transaction mismatches, persistence failures, restore attempts and restore successes.
-- **Current checkpoint position is visible.** The runtime's accepted checkpoint sequence and Lease transition epoch are exported as gauges.
-- **No persistence semantics change.** v1.6.4's unified transaction gate remains unchanged; this release only exposes its runtime state for operations and alerting.
-- **Older runtimes remain compatible.** The HTTP metrics path reads checkpoint fields with zero-valued fallbacks, so runtime variants that predate a counter do not break the metrics endpoint.
-- **Renderer compatibility is preserved.** All existing `controller_metrics.render()` arguments remain valid and every new checkpoint metric parameter is optional with a zero default.
-- **Malformed metric inputs fail safe.** Numeric metric values are normalized to non-negative integers instead of propagating invalid values into the Prometheus response.
-- **Existing controller metrics are unchanged.** Leadership, reconcile, approval, rollback, circuit, rollout, execution, stale-preflight and canary metrics retain their previous names.
-- **No RBAC or Kubernetes resource change.** Metrics are produced from in-memory runtime state and require no additional API permissions.
-
-## New metrics
-
-- `nvlx_nvidia_checkpoint_writes_total`
-- `nvlx_nvidia_checkpoint_idempotent_acks_total`
-- `nvlx_nvidia_checkpoint_rollbacks_total`
-- `nvlx_nvidia_checkpoint_transaction_mismatches_total`
-- `nvlx_nvidia_checkpoint_failures_total`
-- `nvlx_nvidia_checkpoint_restore_attempts_total`
-- `nvlx_nvidia_checkpoint_restore_successes_total`
-- `nvlx_nvidia_checkpoint_sequence`
-- `nvlx_nvidia_checkpoint_epoch`
+- **Readiness now includes checkpoint safety.** Generic controller readiness must still have API reachability, active leadership, fresh inventory and a non-terminating runtime.
+- **Configured checkpoint stores must be restored.** If a Lease-backed NVIDIA continuity checkpoint store is configured, `/readyz` remains unavailable until atomic checkpoint restore has completed successfully.
+- **Stale Lease epochs block readiness.** A checkpoint inherited from a previous Lease transition keeps the controller unready until the existing two-observation takeover revalidation clears `nvidia_checkpoint_epoch_stale`.
+- **Recovered controllers become ready again.** Historical checkpoint failure counters do not permanently poison readiness after state has been restored and revalidated.
+- **No-store runtimes remain compatible.** Runtimes without a checkpoint store retain the previous controller readiness behavior.
+- **Checkpoint health is exported.** `/metrics` adds `nvlx_nvidia_checkpoint_ready`, with `1` only when the checkpoint readiness gate is satisfied.
+- **Metrics failures fail safe.** If checkpoint readiness evaluation raises while rendering metrics, the checkpoint-ready gauge resolves to `0` rather than breaking `/metrics`.
+- **No checkpoint protocol change.** v1.6.4 unified transactions, v1.6.3.9 idempotent acknowledgement fencing, v1.6.3.8 reconciliation, readback verification, replay-floor protection and atomic restore remain unchanged.
+- **No RBAC expansion.** Readiness and telemetry use in-memory runtime state only.
 
 ## Safety invariants
 
-1. Telemetry cannot alter checkpoint state or acknowledge a checkpoint.
-2. Missing runtime telemetry attributes resolve to zero instead of breaking `/metrics`.
-3. Existing metric names and renderer call sites remain backward compatible.
-4. Sequence rollback, equal-sequence proof, Lease epoch, replay-floor, readback and transaction-state fences remain unchanged.
-5. Checkpoint restore and write failure behavior remains fail-closed.
-6. No new Kubernetes mutation path or RBAC permission is introduced.
-7. NVIDIA driver/GPU Operator resources remain read-only.
-8. v1.6.4 unified checkpoint transactions remain the sole durability path.
+1. A controller with a configured checkpoint store is not ready until checkpoint restore has completed.
+2. A stale Lease-transition checkpoint cannot coexist with a ready controller.
+3. Generic API, leadership, inventory-freshness and termination readiness gates remain mandatory.
+4. Historical failure counters do not block readiness after successful recovery.
+5. Readiness evaluation cannot mutate checkpoint state or acknowledge a checkpoint.
+6. Sequence rollback, equal-sequence proof, Lease epoch, replay-floor, readback and transaction-state fences remain unchanged.
+7. No new Kubernetes mutation path or RBAC permission is introduced.
+8. NVIDIA driver/GPU Operator resources remain read-only in v1.6.4.2.
