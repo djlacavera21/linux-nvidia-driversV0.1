@@ -29,22 +29,22 @@ jobs:
         run: python -m unittest discover -s tests -v
       - name: Reproducible archive smoke test
         run: |
-          python scripts/repro_release.py 1.5.8 --out /tmp/repro-a
-          python scripts/repro_release.py 1.5.8 --out /tmp/repro-b
+          python scripts/repro_release.py 1.5.9 --out /tmp/repro-a
+          python scripts/repro_release.py 1.5.9 --out /tmp/repro-b
           cmp /tmp/repro-a/SHA256SUMS /tmp/repro-b/SHA256SUMS
       - name: CLI smoke test
         run: |
-          nvlx --version | grep 1.5.8
+          nvlx --version | grep 1.5.9
           python - <<'PY'
           from nvlx.leadership_v155 import FenceToken
-          from nvlx.fence_monotonic_v158 import assess
-          from nvlx.fence_recovery_v157 import assess as recover
+          from nvlx.fence_sequence_v159 import assess, verify_floor
           previous=FenceToken("controller-a",7,"42")
           renewal=FenceToken("controller-a",7,"43")
-          assert assess(previous,renewal).action == "persist-renewal"
-          assert assess(previous,FenceToken("controller-a",6,"41")).action == "reject-rollback"
-          assert assess(previous,FenceToken("controller-b",7,"43")).action == "reject-epoch-collision"
-          assert assess(previous,renewal,reacquired=True).action == "reject-stale-reacquire"
-          assert assess(previous,FenceToken("controller-b",8,"44"),reacquired=True).action == "persist-new-epoch"
-          assert recover(FenceToken("controller-a",8,"43"),current_holder="controller-a",current_epoch=7,current_resource_version="42").action == "rollback-detected"
+          assert assess(9,previous,10,renewal).action == "persist-next"
+          assert assess(9,previous,9,renewal).action == "reject-sequence-replay"
+          assert assess(9,previous,11,renewal).action == "reject-sequence-gap"
+          assert assess(9,previous,10,previous).action == "reject-redundant-advance"
+          assert assess(9,previous,10,FenceToken("controller-b",8,"44"),reacquired=True).allowed
+          assert verify_floor(8,9).action == "replay-detected"
+          assert verify_floor(9,9).allowed
           PY
