@@ -29,35 +29,31 @@ jobs:
         run: python -m unittest discover -s tests -v
       - name: Reproducible archive smoke test
         run: |
-          python scripts/repro_release.py 1.6.2.8 --out /tmp/repro-a
-          python scripts/repro_release.py 1.6.2.8 --out /tmp/repro-b
+          python scripts/repro_release.py 1.6.2.9 --out /tmp/repro-a
+          python scripts/repro_release.py 1.6.2.9 --out /tmp/repro-b
           cmp /tmp/repro-a/SHA256SUMS /tmp/repro-b/SHA256SUMS
       - name: CLI smoke test
         run: |
-          nvlx --version | grep 1.6.2.8
+          nvlx --version | grep 1.6.2.9
           nvlx-operator --help | grep 'live GPUFleet Kubernetes operator'
           nvlx-operator --help | grep -- '--token-file'
           nvlx-operator --help | grep -- '--watch-timeout-seconds'
           python - <<'PY'
           from nvlx.k8s_api_v16 import ApiResponse
-          from nvlx.runtime_v1628 import Runtime
+          from nvlx.runtime_v1629 import Runtime
 
-          obj={'metadata':{'name':'prod','uid':'u1','generation':4,'resourceVersion':'11','annotations':{},'finalizers':[]},'status':{}}
+          obj={'metadata':{'name':'prod','uid':'u1','generation':4,'resourceVersion':'11','annotations':{}},'status':{}}
           class C:
-              def __init__(self): self.consumed=0
-              def list_fleets(self): return ApiResponse(200,{'metadata':{'resourceVersion':'list-rv'},'items':[]})
+              def __init__(self): self.watch_calls=0
+              def list_fleets(self): return ApiResponse(200,{'metadata':{'resourceVersion':'list-rv'},'items':[obj]},{})
               def watch_path(self,rv): return '/watch'
               def watch_lines(self,path):
-                  for event in [
-                      {'type':'MODIFIED','object':obj},
-                      {'type':'BOOKMARK','object':{'metadata':{'resourceVersion':'12'}}},
-                  ]:
-                      self.consumed += 1
-                      yield event
+                  self.watch_calls += 1
+                  yield {'type':'BOOKMARK','object':{'metadata':{'resourceVersion':'12'}}}
           c=C(); r=Runtime(c,'pod-a',leader_check=lambda:False)
           assert r.list_and_watch_once() == 'relist'
-          assert c.consumed == 1
-          assert r.stats.last_resource_version == 'list-rv'
+          assert c.watch_calls == 0
           assert not r.stats.inventory_fresh
+          assert r.stats.last_resource_version == ''
           assert 'u1' not in r._watch_seen
           PY
