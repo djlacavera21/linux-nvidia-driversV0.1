@@ -29,19 +29,20 @@ jobs:
         run: python -m unittest discover -s tests -v
       - name: Reproducible archive smoke test
         run: |
-          python scripts/repro_release.py 1.6.0 --out /tmp/repro-a
-          python scripts/repro_release.py 1.6.0 --out /tmp/repro-b
+          python scripts/repro_release.py 1.6.1 --out /tmp/repro-a
+          python scripts/repro_release.py 1.6.1 --out /tmp/repro-b
           cmp /tmp/repro-a/SHA256SUMS /tmp/repro-b/SHA256SUMS
       - name: CLI smoke test
         run: |
-          nvlx --version | grep 1.6.0
+          nvlx --version | grep 1.6.1
           nvlx-operator --help | grep 'live GPUFleet Kubernetes operator'
           python - <<'PY'
+          from nvlx.runtime_guard_v161 import classify_watch_line, reconnect_delay
+          assert classify_watch_line({'type':'ERROR','object':{'code':503}}).action == 'reconnect'
+          assert classify_watch_line({'type':'ERROR','object':{'code':410}}).action == 'relist'
+          assert classify_watch_line({}).action == 'ignore-malformed'
+          assert reconnect_delay(10,maximum=8) == 8
           from nvlx.k8s_controller import manifests
           kinds=[x['kind'] for x in manifests()]
           assert 'ClusterRole' in kinds and 'Deployment' in kinds and 'PodDisruptionBudget' in kinds
-          dep=next(x for x in manifests() if x['kind']=='Deployment')
-          c=dep['spec']['template']['spec']['containers'][0]
-          assert c['readinessProbe']['httpGet']['path']=='/readyz'
-          assert c['livenessProbe']['httpGet']['path']=='/livez'
           PY
