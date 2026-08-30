@@ -11,7 +11,7 @@ class ConflictClient:
         self.patches += 1
         if self.patches == 1:
             raise ApiError(409,"conflict")
-        return ApiResponse(200,{"metadata":{"name":name,"resourceVersion":"12"},"status":status})
+        return ApiResponse(200,{"metadata":{"name":name,"uid":"u1","generation":4,"resourceVersion":"12"},"status":status})
     def get_fleet(self,name):
         self.gets += 1
         return ApiResponse(200,{"metadata":self.fresh_meta})
@@ -40,17 +40,18 @@ class V1613Tests(unittest.TestCase):
         self.assertEqual(client.patches,1)
 
     def test_status_success_must_echo_planned_status_fields(self):
-        response=ApiResponse(200,{"metadata":{"name":"prod","resourceVersion":"11"},"status":{"phase":"Degraded"}})
-        self.assertFalse(Runtime._status_response_verified(response,"prod",{"phase":"Ready"}))
+        expected={"name":"prod","uid":"u1","generation":4}
+        response=ApiResponse(200,{"metadata":{"name":"prod","uid":"u1","generation":4,"resourceVersion":"11"},"status":{"phase":"Degraded"}})
+        self.assertFalse(Runtime._status_response_verified(response,expected,{"phase":"Ready"}))
 
     def test_finalizer_success_requires_protective_finalizer_absent(self):
         still_present=ApiResponse(200,{"metadata":{"name":"prod","resourceVersion":"11","finalizers":[PROTECTIVE_FINALIZER]}})
         cleared=ApiResponse(200,{"metadata":{"name":"prod","resourceVersion":"12","finalizers":["other.example/finalizer"]}})
-        self.assertFalse(Runtime._finalizer_response_verified(still_present,"prod"))
-        self.assertTrue(Runtime._finalizer_response_verified(cleared,"prod"))
+        self.assertFalse(Runtime._finalizer_response_verified(still_present,"prod",[]))
+        self.assertTrue(Runtime._finalizer_response_verified(cleared,"prod",["other.example/finalizer"]))
 
     def test_finalizer_success_requires_finalizer_list(self):
         response=ApiResponse(200,{"metadata":{"name":"prod","resourceVersion":"11"}})
-        self.assertFalse(Runtime._finalizer_response_verified(response,"prod"))
+        self.assertFalse(Runtime._finalizer_response_verified(response,"prod",[]))
 
 if __name__=="__main__": unittest.main()
