@@ -59,7 +59,7 @@ class TerminalParserErrorTests(unittest.TestCase):
                 b"GET /" + (b"a" * 65536) + b" HTTP/1.1\r\nHost: x\r\n\r\n",
             )
             self.assert_terminal_error(self, response, 414)
-            self.assertNotIn(b"Request-URI Too Long", response)
+            self.assertNotIn(b"a" * 128, response)
         finally:
             server.close()
 
