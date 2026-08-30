@@ -66,14 +66,18 @@ def _leadership_fresh_observation(runtime, stats) -> bool:
 
 
 def _readiness_snapshot(runtime, stats) -> ReadinessSnapshot:
-    """Evaluate full readiness once and capture the independently observable gates."""
+    """Evaluate authoritative readiness first, then observe the resulting gate state."""
+    # Runtime readiness is allowed to refresh or invalidate cached leadership and
+    # other fail-closed state. Evaluate it first so a single HTTP response never
+    # mixes diagnostic observations from before that transition with controller
+    # state from after it.
+    controller_ready = _runtime_ready(runtime, stats)
     api_reachable = bool(getattr(stats, "api_reachable", False))
     inventory_fresh = bool(getattr(stats, "inventory_fresh", False))
     terminating = bool(getattr(stats, "terminating", False))
     nvidia_preflight_ready = bool(getattr(runtime, "nvidia_preflight_ok", True))
     leadership_fresh = _leadership_fresh_observation(runtime, stats)
     checkpoint_ready = _checkpoint_ready(runtime)
-    controller_ready = _runtime_ready(runtime, stats)
     return ReadinessSnapshot(
         controller_ready=controller_ready,
         api_reachable=api_reachable,
