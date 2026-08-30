@@ -5,6 +5,7 @@ from nvlx.k8s_api_v16 import ApiError, ApiResponse
 from nvlx.nvidia_inventory_v163 import NvidiaInventory, NvidiaInventoryError, NvidiaPreflight, NvidiaSnapshot
 from nvlx.runtime_v1629 import Runtime as RuntimeV1629
 from nvlx.runtime_v163 import Runtime
+from nvlx.k8s_controller import manifests
 
 
 def obj(name, *, state="ready", spec=None, labels=None):
@@ -21,16 +22,23 @@ def obj(name, *, state="ready", spec=None, labels=None):
 class FakeClient:
     def __init__(self, *, gpuclusters=(), policies=(), drivers=(), domains=(), cliques=(), nodes=(), resource_group=True):
         self.values={
-            "/apis/nvidia.com":{"preferredVersion":{"groupVersion":"nvidia.com/v1"}},
-            "/apis/nvidia.com/v1":{"resources":[{"name":"gpuclusters"},{"name":"clusterpolicies"},{"name":"nvidiadrivers"}]},
-            "/apis/nvidia.com/v1/gpuclusters":{"items":list(gpuclusters)},
+            "/apis/nvidia.com":{
+                "preferredVersion":{"groupVersion":"nvidia.com/v1"},
+                "versions":[{"groupVersion":"nvidia.com/v1"},{"groupVersion":"nvidia.com/v1alpha1"}],
+            },
+            "/apis/nvidia.com/v1":{"resources":[{"name":"clusterpolicies"}]},
+            "/apis/nvidia.com/v1alpha1":{"resources":[{"name":"gpuclusters"},{"name":"nvidiadrivers"}]},
             "/apis/nvidia.com/v1/clusterpolicies":{"items":list(policies)},
-            "/apis/nvidia.com/v1/nvidiadrivers":{"items":list(drivers)},
+            "/apis/nvidia.com/v1alpha1/gpuclusters":{"items":list(gpuclusters)},
+            "/apis/nvidia.com/v1alpha1/nvidiadrivers":{"items":list(drivers)},
             "/api/v1/nodes":{"items":list(nodes)},
         }
         if resource_group:
             self.values.update({
-                "/apis/resource.nvidia.com":{"preferredVersion":{"groupVersion":"resource.nvidia.com/v1beta1"}},
+                "/apis/resource.nvidia.com":{
+                    "preferredVersion":{"groupVersion":"resource.nvidia.com/v1beta1"},
+                    "versions":[{"groupVersion":"resource.nvidia.com/v1beta1"}],
+                },
                 "/apis/resource.nvidia.com/v1beta1":{"resources":[{"name":"computedomains"},{"name":"computedomaincliques"}]},
                 "/apis/resource.nvidia.com/v1beta1/computedomains":{"items":list(domains)},
                 "/apis/resource.nvidia.com/v1beta1/computedomaincliques":{"items":list(cliques)},
@@ -45,7 +53,7 @@ class FakeClient:
 
 
 class InventoryTests(unittest.TestCase):
-    def test_gpucluster_dra_inventory_is_ready(self):
+    def test_gpucluster_dra_inventory_is_ready_across_group_versions(self):
         client=FakeClient(
             gpuclusters=[obj("gpu-cluster")],
             drivers=[obj("default",spec={"default":True,"version":"580"})],
@@ -57,7 +65,10 @@ class InventoryTests(unittest.TestCase):
         self.assertTrue(result.ready)
         self.assertEqual(result.mode,"dra")
         self.assertEqual(len(result.snapshot.gpu_nodes),1)
+        self.assertIn(("nvidia.com","v1"),result.snapshot.api_versions)
+        self.assertIn(("nvidia.com","v1alpha1"),result.snapshot.api_versions)
         self.assertIn(("resource.nvidia.com","v1beta1"),result.snapshot.api_versions)
+        self.assertIn(("GET","/apis/nvidia.com/v1alpha1/nvidiadrivers"),client.calls)
 
     def test_clusterpolicy_device_plugin_inventory_is_ready(self):
         client=FakeClient(
@@ -103,11 +114,9 @@ class InventoryTests(unittest.TestCase):
 
     def test_no_gpu_and_no_nvidia_api_is_safe_no_gpu_mode(self):
         client=FakeClient(resource_group=False)
-        del client.values["/apis/nvidia.com"]
-        del client.values["/apis/nvidia.com/v1"]
-        del client.values["/apis/nvidia.com/v1/gpuclusters"]
-        del client.values["/apis/nvidia.com/v1/clusterpolicies"]
-        del client.values["/apis/nvidia.com/v1/nvidiadrivers"]
+        for path in list(client.values):
+            if path.startswith("/apis/nvidia.com"):
+                del client.values[path]
         result=NvidiaInventory(client).check()
         self.assertTrue(result.ready)
         self.assertEqual(result.mode,"no-gpu")
@@ -121,10 +130,18 @@ class InventoryTests(unittest.TestCase):
 
     def test_malformed_discovery_fails_closed(self):
         client=FakeClient(policies=[obj("cluster-policy")])
-        client.values["/apis/nvidia.com"]={"preferredVersion":{}}
-        client.values.pop("/apis/nvidia.com/v1",None)
+        client.values["/apis/nvidia.com"]={"preferredVersion":{},"versions":[{"bad":"entry"}]}
         with self.assertRaises(NvidiaInventoryError):
             NvidiaInventory(client).snapshot()
+
+    def test_rbac_expansion_is_read_only_for_nvidia_and_nodes(self):
+        role=[item for item in manifests() if item["kind"]=="ClusterRole"][0]
+        rules=role["rules"]
+        inventory_rules=[r for r in rules if r["apiGroups"] in (["nvidia.com"],["resource.nvidia.com"],[""])]
+        self.assertEqual(len(inventory_rules),3)
+        for rule in inventory_rules:
+            self.assertTrue(set(rule["verbs"]).issubset({"get","list","watch"}))
+        self.assertTrue(any(r["apiGroups"]==[""] and r["resources"]==["nodes"] for r in inventory_rules))
 
 
 class RuntimeTests(unittest.TestCase):
