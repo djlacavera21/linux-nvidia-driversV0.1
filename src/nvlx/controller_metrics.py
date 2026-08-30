@@ -2,11 +2,29 @@
 from __future__ import annotations
 
 
+_COUNTER_METRICS = {
+    "nvlx_controller_reconcile_total",
+    "nvlx_controller_reconcile_failures_total",
+    "nvlx_controller_preflight_stale_total",
+    "nvlx_nvidia_checkpoint_writes_total",
+    "nvlx_nvidia_checkpoint_idempotent_acks_total",
+    "nvlx_nvidia_checkpoint_rollbacks_total",
+    "nvlx_nvidia_checkpoint_transaction_mismatches_total",
+    "nvlx_nvidia_checkpoint_failures_total",
+    "nvlx_nvidia_checkpoint_restore_attempts_total",
+    "nvlx_nvidia_checkpoint_restore_successes_total",
+}
+
+
 def _nonnegative(value: int) -> int:
     try:
         return max(0, int(value))
     except (TypeError, ValueError):
         return 0
+
+
+def _metric_type(name: str) -> str:
+    return "counter" if name in _COUNTER_METRICS else "gauge"
 
 
 def render(
@@ -66,4 +84,7 @@ def render(
         "nvlx_nvidia_checkpoint_epoch": _nonnegative(checkpoint_epoch),
         "nvlx_nvidia_checkpoint_ready": 1 if checkpoint_ready else 0,
     }
-    return "".join(f"# TYPE {k} gauge\n{k} {v}\n" for k, v in vals.items())
+    return "".join(
+        f"# TYPE {name} {_metric_type(name)}\n{name} {value}\n"
+        for name, value in vals.items()
+    )

@@ -1,39 +1,48 @@
-# nvlx: Linux-NVIDIA-Driver v1.6.4.5
+# nvlx: Linux-NVIDIA-Driver v1.6.4.6
 
-`nvlx` v1.6.4.5 adds structured readiness diagnostics so operators can see which individual safety gate is blocking the full controller readiness result introduced in v1.6.4.4.
+`nvlx` v1.6.4.6 corrects Prometheus metric type metadata so cumulative totals are exported as counters while readiness, health, checkpoint sequence and Lease epoch state remain gauges.
 
 > [!IMPORTANT]
 > NVIDIA driver/GPU Operator resources remain read-only. The operator still mutates only nvlx-owned GPUFleet status/finalizers plus its existing Lease and Events.
 
-## v1.6.4.5 structured readiness diagnostics
+## v1.6.4.6 Prometheus type correctness
 
-- **Readiness is now observable gate-by-gate.** `/metrics` exposes API reachability, Lease leadership freshness, inventory continuity, NVIDIA preflight readiness, checkpoint readiness and termination state independently.
-- **The composite result remains authoritative.** `nvlx_controller_ready` still comes from the runtime's complete readiness contract and remains the metric counterpart to `/readyz`.
-- **Lease freshness is observed independently.** A non-mutating observation of the timestamped Lease proof is exported as `nvlx_controller_leadership_fresh`, while the established runtime readiness path retains its existing fail-closed leadership invalidation behavior.
-- **Preflight and checkpoint health are distinguishable.** `nvlx_nvidia_preflight_ready` and `nvlx_nvidia_checkpoint_ready` allow a safe checkpoint, failed inventory preflight, or vice versa to be identified directly.
-- **API and inventory continuity are explicit.** `nvlx_controller_api_reachable` and `nvlx_controller_inventory_fresh` expose the two continuity prerequisites without requiring inference from the composite readiness result.
-- **Termination is explicit.** `nvlx_controller_terminating` becomes `1` during shutdown so an intentional readiness drop can be distinguished from a failure.
-- **Older runtimes remain compatible.** Runtimes without timestamped Lease freshness, NVIDIA preflight, checkpoint readiness or a custom `ready()` method retain safe fallbacks based on their existing stats.
-- **No readiness-policy change.** The release adds diagnostics around the v1.6.4.3/v1.6.4.4 contract; it does not weaken or add a serving gate.
-- **No persistence or RBAC change.** Checkpoint envelopes, replay floors, sequence fencing, readback verification, idempotent acknowledgement handling and Kubernetes permissions remain unchanged.
+- **Cumulative totals are counters.** Reconcile totals, reconcile failures, preflight-stale events, checkpoint writes, idempotent acknowledgements, rollbacks, transaction mismatches, checkpoint failures, restore attempts and restore successes now emit `# TYPE ... counter`.
+- **Instantaneous state remains gauge data.** Controller readiness, API reachability, Lease freshness, inventory freshness, termination state, NVIDIA preflight readiness, checkpoint readiness, pending approvals, rollback-required state, rollout slots, canary wave, checkpoint sequence and checkpoint Lease epoch remain gauges.
+- **Metric names are unchanged.** Existing dashboards and queries can continue using the same series names.
+- **Metric values are unchanged.** The release changes Prometheus metadata only; runtime counters and readiness values retain their existing meaning and normalization behavior.
+- **HTTP telemetry is covered end-to-end.** Regression tests validate the actual `/metrics` surface as well as the renderer.
+- **One declaration per metric.** Every emitted sample has exactly one corresponding `# TYPE` declaration.
+- **No readiness-policy change.** Structured readiness diagnostics from v1.6.4.5 and readiness parity from v1.6.4.4 remain intact.
+- **No checkpoint protocol change.** Unified transactions, sequence fencing, replay protection, readback verification, idempotent acknowledgement handling and Lease-epoch validation are unchanged.
+- **No RBAC expansion.** The release changes only telemetry formatting and tests.
 
-## Readiness metrics
+## Prometheus type rules
 
-- `nvlx_controller_ready` — authoritative full controller readiness.
-- `nvlx_controller_api_reachable` — Kubernetes API reachability gate.
-- `nvlx_controller_leadership_fresh` — effective Lease leadership freshness gate.
-- `nvlx_controller_inventory_fresh` — validated list/watch continuity gate.
-- `nvlx_nvidia_preflight_ready` — NVIDIA inventory/preflight gate.
-- `nvlx_nvidia_checkpoint_ready` — persisted continuity checkpoint gate.
-- `nvlx_controller_terminating` — shutdown state; `1` means the controller is terminating.
+### Counters
+
+- `nvlx_controller_reconcile_total`
+- `nvlx_controller_reconcile_failures_total`
+- `nvlx_controller_preflight_stale_total`
+- `nvlx_nvidia_checkpoint_writes_total`
+- `nvlx_nvidia_checkpoint_idempotent_acks_total`
+- `nvlx_nvidia_checkpoint_rollbacks_total`
+- `nvlx_nvidia_checkpoint_transaction_mismatches_total`
+- `nvlx_nvidia_checkpoint_failures_total`
+- `nvlx_nvidia_checkpoint_restore_attempts_total`
+- `nvlx_nvidia_checkpoint_restore_successes_total`
+
+### Gauges
+
+All exported point-in-time controller, readiness, rollout, checkpoint sequence and Lease epoch values remain gauges.
 
 ## Safety invariants
 
-1. `nvlx_controller_ready` remains the authoritative result and continues to match `/readyz`.
-2. Diagnostic gauges cannot make an unready controller ready or bypass any runtime gate.
-3. Lease freshness diagnostics use a non-mutating observation; the established runtime may still invalidate stale leadership while evaluating the authoritative readiness result.
-4. A failed API, Lease, inventory, NVIDIA preflight, checkpoint or termination gate remains sufficient to keep the controller unready under the existing runtime contract.
-5. Unknown legacy runtime capabilities use conservative stats-based compatibility behavior rather than raising from the health endpoint.
+1. Metric names and numeric values remain compatible with v1.6.4.5.
+2. Cumulative `*_total` series listed above are declared as Prometheus counters.
+3. Instantaneous readiness and state series remain gauges.
+4. Type metadata cannot alter runtime readiness, checkpoint persistence or controller mutation behavior.
+5. Structured readiness diagnostics and `/readyz` parity remain unchanged.
 6. Checkpoint persistence, sequence, replay, epoch, readback and idempotency semantics are unchanged.
 7. No new Kubernetes mutation path or RBAC permission is introduced.
-8. NVIDIA driver/GPU Operator resources remain read-only in v1.6.4.5.
+8. NVIDIA driver/GPU Operator resources remain read-only in v1.6.4.6.
