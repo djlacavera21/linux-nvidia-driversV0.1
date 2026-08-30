@@ -22,6 +22,8 @@ class RuntimeStats:
     reconnects: int=0
     duplicate_watch_events: int=0
     stale_generation_events: int=0
+    relist_seeded_objects: int=0
+    deleted_watch_events: int=0
 
 @dataclass
 class Runtime:
@@ -77,26 +79,46 @@ class Runtime:
         try: return int(generation or 0) >= 0
         except (TypeError,ValueError): return False
 
-    def _watch_event_disposition(self, obj: object, event_type: str) -> str:
-        """Classify watch delivery without comparing opaque resourceVersion values."""
-        if not self._object_identity_valid(obj): return "invalid"
+    @staticmethod
+    def _watch_key(obj: dict) -> tuple[str,str,int,str]:
         meta=obj["metadata"]
         name=meta["name"]
         uid=meta.get("uid") if isinstance(meta.get("uid"),str) else ""
-        rv=meta["resourceVersion"]
         generation=int(meta.get("generation",0) or 0)
+        rv=meta["resourceVersion"]
+        return (name,uid,generation,rv)
+
+    def _seed_watch_state_from_list(self, items: list[dict]) -> None:
+        for item in items:
+            name,uid,generation,rv=self._watch_key(item)
+            key=uid or f"name:{name}"
+            self._watch_seen[key]=("LIST",uid,generation,rv)
+            self.stats.relist_seeded_objects += 1
+
+    def _watch_event_disposition(self, obj: object, event_type: str) -> str:
+        """Classify watch delivery without ordering opaque resourceVersion values."""
+        if not self._object_identity_valid(obj): return "invalid"
+        name,uid,generation,rv=self._watch_key(obj)
         key=uid or f"name:{name}"
-        fingerprint=(event_type,uid,generation,rv)
         previous=self._watch_seen.get(key)
-        if previous == fingerprint:
-            self.stats.duplicate_watch_events += 1
-            return "duplicate"
         if previous is not None:
-            _prev_type,prev_uid,prev_generation,_prev_rv=previous
-            if uid and prev_uid == uid and generation < prev_generation:
+            prev_type,prev_uid,prev_generation,prev_rv=previous
+            same_state=(prev_uid==uid and prev_generation==generation and prev_rv==rv)
+            if same_state:
+                if event_type=="DELETED" and prev_type!="DELETED":
+                    self._watch_seen[key]=(event_type,uid,generation,rv)
+                    self.stats.deleted_watch_events += 1
+                    return "reconcile-delete"
+                if event_type==prev_type or (event_type in {"ADDED","MODIFIED"} and prev_type in {"LIST","ADDED","MODIFIED"}):
+                    self.stats.duplicate_watch_events += 1
+                    return "duplicate"
+            if uid and prev_uid==uid and generation < prev_generation:
                 self.stats.stale_generation_events += 1
                 return "stale-generation"
-        self._watch_seen[key]=fingerprint
+        self._watch_seen[key]=(event_type,uid,generation,rv)
+        if event_type=="DELETED":
+            self.stats.deleted_watch_events += 1
+            return "reconcile-delete"
         return "reconcile"
 
     @classmethod
@@ -203,6 +225,8 @@ class Runtime:
         meta=obj["metadata"]; name=meta["name"]; rv=meta["resourceVersion"]
         generation=int(meta.get("generation",0) or 0)
         self.stats.last_resource_version=rv
+        if event_type=="DELETED" and not meta.get("deletionTimestamp"):
+            return "deleted-observed"
         if meta.get("deletionTimestamp"):
             return "finalized" if self._finalize(obj) else "finalizer-hold"
         if not self._leader(): return "standby"
@@ -233,6 +257,7 @@ class Runtime:
         for item in items:
             if self._stop.is_set(): return "stopped"
             self.reconcile_object(item,event_type="ADDED")
+        self._seed_watch_state_from_list(items)
         self.stats.inventory_fresh=True; self.stats.last_resource_version=rv
         try:
             for event in self.client.watch_lines(self.client.watch_path(rv)):
