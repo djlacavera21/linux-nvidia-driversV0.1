@@ -50,10 +50,11 @@ class HealthServer(HealthServerV166666662):
                     return True
 
                 # The live endpoints accept no request body and have no reason to
-                # negotiate 100-continue or any extension expectation. Reject the
-                # expectation itself after all earlier syntax/framing gates pass.
+                # negotiate 100-continue or any extension expectation. Reuse the
+                # inherited canonical non-reflective error writer directly so 417
+                # receives the same fixed Request Rejected reason as parser errors.
                 self.close_connection = True
-                self.send_error(417)
+                self._send_parser_error_and_close(417)
                 return False
 
         self.httpd.RequestHandlerClass = Handler
