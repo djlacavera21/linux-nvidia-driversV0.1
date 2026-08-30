@@ -1,28 +1,31 @@
-# nvlx: Linux-NVIDIA-Driver v1.6.3.1
+# nvlx: Linux-NVIDIA-Driver v1.6.3.2
 
-`nvlx` v1.6.3.1 hardens the live read-only NVIDIA inventory introduced in v1.6.3. The patch validates Kubernetes discovery and returned-object identity before NVIDIA state can establish GPUFleet readiness.
+`nvlx` v1.6.3.2 adds continuity fencing to the live read-only NVIDIA inventory introduced in v1.6.3 and hardened in v1.6.3.1.
 
 > [!IMPORTANT]
 > NVIDIA driver/GPU Operator resources remain read-only. The operator still mutates only nvlx-owned GPUFleet status/finalizers plus its Lease and Events.
 
-## v1.6.3.1 inventory identity hardening
+## v1.6.3.2 NVIDIA snapshot continuity
 
-- **Discovery identity verification.** A served discovery document may report `groupVersion`; when present it must match the group/version being queried.
-- **Cluster-scope contract enforcement.** NVIDIA resources used by the inventory must not be advertised as namespaced, and returned objects must not carry a namespace.
-- **Object API identity checks.** Returned NVIDIA objects may report `apiVersion`; when present it must match the exact discovered API endpoint used to list that resource.
-- **Metadata integrity.** Optional UID and `resourceVersion` values must be non-empty strings when present. Kubernetes `resourceVersion` remains opaque and is never ordered.
-- **GPU Node identity checks.** GPU-labeled inventory objects must remain core/v1 Nodes and cluster scoped when those identity fields are present.
-- **TOCTOU discovery check.** The hardened layer revalidates that each mapped resource is still advertised by the selected served version before listing it.
-- **Fail-closed runtime behavior retained.** Any discovery or identity mismatch raises an inventory error, keeps NVIDIA preflight false, invalidates inventory freshness, and prevents GPUFleet continuity establishment.
-- **No RBAC expansion.** v1.6.3.1 adds no permissions beyond the read-only NVIDIA and Node inventory permissions from v1.6.3.
+- **Baseline identity.** The first healthy NVIDIA snapshot establishes a trusted in-process identity baseline.
+- **Two-snapshot promotion.** Any later identity/topology change is fenced for one cycle and must be observed identically on the next fresh preflight before it becomes the new baseline.
+- **Same-name replacement detection.** UID changes for GPUCluster, ClusterPolicy, NVIDIADriver, ComputeDomain, ComputeDomainClique, or GPU Nodes are treated as incarnation changes even when names stay the same.
+- **API remapping detection.** Changes to discovered NVIDIA API versions or resource mappings break continuity and require confirmation.
+- **GPU-node membership fencing.** GPU Node identity-set changes cannot silently establish a new GPUFleet continuity window.
+- **Candidate churn fails closed.** If a candidate changes again before confirmation, the new candidate replaces it and the fence remains closed.
+- **Return-to-baseline recovery.** If the original baseline reappears, the pending candidate is discarded and continuity may proceed normally.
+- **Opaque resourceVersion preserved.** Ordinary Kubernetes `resourceVersion` changes are excluded from snapshot identity and are never numerically or lexically ordered.
+- **UID required for continuity.** Objects participating in continuity must expose stable Kubernetes metadata.uid values; missing UID fails closed.
+- **Read-only boundary unchanged.** No NVIDIA mutation path or write verb is introduced.
 
 ## Safety invariants
 
-1. NVIDIA discovery and object identity must be coherent before inventory is trusted.
-2. Cluster-scoped NVIDIA control-plane resources cannot be accepted from namespaced discovery or namespaced list objects.
-3. Returned object API versions cannot contradict the endpoint that produced them.
-4. Optional identity fields fail closed when present but malformed.
-5. Kubernetes `resourceVersion` remains opaque and is never numerically or lexically ordered.
-6. GPUCluster/ClusterPolicy mutual exclusion, singleton naming, readiness, default-driver, unmanaged-GPU, and ComputeDomain checks from v1.6.3 remain active.
-7. The v1.6.2.9 atomic relist settlement barrier and all prior watch, cursor, finalizer, generation, Lease, and leadership safeguards remain active.
-8. NVIDIA resources remain read-only; no live driver/GPU Operator mutation path is introduced.
+1. A changed NVIDIA snapshot cannot establish GPUFleet continuity after only one observation.
+2. Stable legitimate topology changes can converge after two identical fresh preflights.
+3. Same-name object recreation is distinguished by Kubernetes UID.
+4. API-version/resource-map changes are part of continuity identity.
+5. GPU-node membership and incarnation are part of continuity identity.
+6. Kubernetes `resourceVersion` remains opaque update metadata, not incarnation identity.
+7. v1.6.3.1 discovery/API identity validation remains active.
+8. v1.6.2.9 relist settlement and all prior watch, cursor, finalizer, generation, Lease, leadership, and inventory safeguards remain active.
+9. NVIDIA resources remain read-only in v1.6.3.2.
