@@ -21,6 +21,7 @@ def render(
     completed_executions: int = 0,
     preflight_stale: int = 0,
     canary_wave: int = 0,
+    controller_ready: bool = False,
     checkpoint_writes: int = 0,
     checkpoint_idempotent_acks: int = 0,
     checkpoint_rollbacks: int = 0,
@@ -34,6 +35,7 @@ def render(
 ) -> str:
     vals = {
         "nvlx_controller_leader": 1 if leader else 0,
+        "nvlx_controller_ready": 1 if controller_ready else 0,
         "nvlx_controller_reconcile_total": _nonnegative(reconcile_total),
         "nvlx_controller_reconcile_failures_total": _nonnegative(reconcile_failures),
         "nvlx_controller_pending_approvals": _nonnegative(pending_approvals),
