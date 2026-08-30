@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "nvlx"
-version = "1.6.4"
-description = "Real Kubernetes NVIDIA GPU fleet operator with unified replay-fenced checkpoint transactions across normal continuity and Lease-transition paths"
+version = "1.6.4.1"
+description = "Real Kubernetes NVIDIA GPU fleet operator with Prometheus telemetry for unified replay-fenced checkpoint transactions"
 readme = "README.md"
 requires-python = ">=3.11"
 license = {text = "MIT"}
