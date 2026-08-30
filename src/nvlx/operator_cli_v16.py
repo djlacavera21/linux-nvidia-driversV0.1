@@ -4,7 +4,7 @@ import argparse, os
 from pathlib import Path
 from .k8s_api_v16 import KubeClient
 from .lease_v16 import LeaseElector
-from .runtime_v16 import Runtime
+from .runtime_v1621 import Runtime
 from .http_v16 import HealthServer
 
 def _read_token_file(path: str) -> str:
@@ -22,8 +22,8 @@ def main(argv=None):
     p.add_argument("--identity",default=os.environ.get("POD_NAME") or os.environ.get("HOSTNAME") or "nvlx-controller")
     p.add_argument("--health-host",default="0.0.0.0"); p.add_argument("--health-port",type=int,default=8080)
     p.add_argument("--timeout",type=float,default=10.0)
-    p.add_argument("--watch-timeout",type=float,default=35.0,help="client-side watch socket timeout in seconds")
-    p.add_argument("--watch-timeout-seconds",type=int,default=30,help="Kubernetes watch timeoutSeconds value")
+    p.add_argument("--watch-timeout",type=float,default=25.0,help="client-side watch socket timeout in seconds")
+    p.add_argument("--watch-timeout-seconds",type=int,default=20,help="Kubernetes watch timeoutSeconds value")
     p.add_argument("--once",action="store_true")
     a=p.parse_args(argv)
     token=a.token
@@ -35,7 +35,7 @@ def main(argv=None):
     kwargs={"timeout":a.timeout,"watch_timeout":a.watch_timeout,"watch_timeout_seconds":a.watch_timeout_seconds}
     client=KubeClient(a.server,token=token,**kwargs) if a.server else KubeClient.in_cluster(**kwargs)
     elector=LeaseElector(client,a.identity,namespace=a.namespace)
-    runtime=Runtime(client,a.identity,namespace=a.namespace,leader_check=elector.ensure_leader)
+    runtime=Runtime(client,a.identity,namespace=a.namespace,leader_check=elector.ensure_leader,leader_fresh_seconds=25.0)
     server=HealthServer(runtime,a.health_host,a.health_port).start()
     try:
         if a.once:
