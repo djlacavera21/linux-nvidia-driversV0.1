@@ -29,26 +29,24 @@ jobs:
         run: python -m unittest discover -s tests -v
       - name: Reproducible archive smoke test
         run: |
-          python scripts/repro_release.py 1.6.2.3 --out /tmp/repro-a
-          python scripts/repro_release.py 1.6.2.3 --out /tmp/repro-b
+          python scripts/repro_release.py 1.6.2.4 --out /tmp/repro-a
+          python scripts/repro_release.py 1.6.2.4 --out /tmp/repro-b
           cmp /tmp/repro-a/SHA256SUMS /tmp/repro-b/SHA256SUMS
       - name: CLI smoke test
         run: |
-          nvlx --version | grep 1.6.2.3
+          nvlx --version | grep 1.6.2.4
           nvlx-operator --help | grep 'live GPUFleet Kubernetes operator'
           nvlx-operator --help | grep -- '--token-file'
           nvlx-operator --help | grep -- '--watch-timeout-seconds'
           python - <<'PY'
           from nvlx.k8s_api_v16 import ApiResponse
-          from nvlx.runtime_v1623 import Runtime
+          from nvlx.runtime_v1624 import Runtime
           class C:
-              def __init__(self): self.runtime=None; self.observed=False
               def list_fleets(self): return ApiResponse(200,{'metadata':{'resourceVersion':'rv'},'items':[]})
               def watch_path(self,rv): return '/watch'
-              def watch_lines(self,path):
-                  self.observed=self.runtime.stats.inventory_fresh
-                  return iter(())
-          c=C(); r=Runtime(c,'pod-a',leader_check=lambda:True,leader_fresh_seconds=25); c.runtime=r
-          assert r.list_and_watch_once() == 'eof'
-          assert c.observed and not r.stats.inventory_fresh and not r.ready()
+              def watch_lines(self,path): return iter([None])
+          r=Runtime(C(),'pod-a',leader_check=lambda:True,leader_fresh_seconds=25)
+          assert r.list_and_watch_once() == 'relist'
+          assert not r.stats.inventory_fresh
+          assert r.stats.reconcile_failures == 1
           PY
