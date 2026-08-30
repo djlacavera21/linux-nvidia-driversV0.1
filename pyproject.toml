@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "nvlx"
-version = "1.5.9"
-description = "Live Kubernetes NVIDIA GPU fleet operator with sequenced fencing checkpoints, replay detection, monotonic recovery, and fail-closed leadership mutation fencing"
+version = "1.6.0"
+description = "Real Kubernetes NVIDIA GPU fleet operator with live list/watch, status and finalizer PATCH, events, Lease CAS fencing, and health endpoints"
 readme = "README.md"
 requires-python = ">=3.11"
 license = {text = "MIT"}
@@ -17,6 +17,7 @@ nvlx = "nvlx.cli:main"
 nvlx-fleet = "nvlx.fleet_cli:main"
 nvlx-controller = "nvlx.v1_cli:main"
 nvlx-k8s = "nvlx.k8s_cli:main"
+nvlx-operator = "nvlx.operator_cli_v16:main"
 
 [tool.setuptools]
 package-dir = {"" = "src"}

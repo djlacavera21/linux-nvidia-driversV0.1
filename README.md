@@ -1,26 +1,29 @@
-# nvlx: Linux-NVIDIA-Driver v1.5.9
+# nvlx: Linux-NVIDIA-Driver v1.6.0
 
-`nvlx` v1.5.9 is a ninth stabilization patch for the live Kubernetes operator. It adds sequenced fencing checkpoints on top of the existing monotonic epoch and integrity controls so an older but otherwise valid persisted snapshot cannot silently re-enter the controller mutation path.
+`nvlx` v1.6.0 is the first release in this repository to move the Kubernetes operator from reconciliation planning into a real API-backed runtime. It performs live GPUFleet list/watch operations, status and finalizer PATCH requests, Kubernetes Event creation, Lease-based leader election/fencing, and serves HTTP liveness/readiness/Prometheus endpoints.
 
 > [!IMPORTANT]
-> Sequence numbers are an additional safety signal, not standalone authority. A controller still requires integrity-valid persisted state, live Lease holder/epoch/resourceVersion/freshness validation, monotonic fencing checks, and an acceptable sequence checkpoint before controller-owned mutation is allowed.
+> v1.6 intentionally keeps NVIDIA resource changes read-only. The operator can observe NVIDIA CRDs/resources and mutate only nvlx-owned GPUFleet status/finalizers plus its Lease and Events. Driver/GPU Operator mutation remains behind the existing approval/preflight/rollback architecture for a later runtime release.
 
-## v1.5.9 fixes
+## v1.6.0 runtime
 
-- **Sequenced fencing checkpoints.** Initial persisted authority starts at sequence `1`; subsequent authority changes must advance the sequence by exactly one.
-- **Replay detection.** A changed fencing token presented at the already-persisted sequence is rejected as `reject-sequence-replay`.
-- **Sequence rollback protection.** A candidate sequence lower than persisted state is rejected as `reject-sequence-rollback`.
-- **Gap protection.** Sequence jumps larger than one are rejected as `reject-sequence-gap` rather than being silently accepted.
-- **Redundant-advance protection.** An unchanged fencing token cannot advance the sequence, preventing checkpoint drift unrelated to authority changes.
-- **Reacquisition preservation.** Reacquired leadership still has to satisfy v1.5.8's newer-epoch requirement before its next sequence can persist.
-- **Trusted-floor check.** Startup can compare a persisted sequence against an independently retained minimum and surface `replay-detected` when the disk snapshot predates that checkpoint.
-- **1.5.8 retained.** Monotonic epochs, same-epoch holder collision rejection, integrity envelopes, rollback-aware recovery, live Lease revalidation, renewal-race fencing and stale-leader blocking remain active.
+- **Real Kubernetes transport.** Stdlib HTTPS client supports in-cluster ServiceAccount token/CA authentication, bounded timeouts, JSON API calls, and newline watch streams without shelling out to `kubectl`.
+- **Live GPUFleet list/watch.** The runtime lists cluster-scoped `nvlx.io/v1alpha1` GPUFleets, resumes from `resourceVersion`, accepts watch bookmarks, and relists on HTTP/watch `410 Gone`.
+- **Real status PATCH.** Controller-owned status writes use the `/status` subresource with optimistic `resourceVersion`. `409`/`412` conflicts refetch and recompute the write boundary once rather than overwriting blindly.
+- **Real finalizer PATCH.** Deletion removes only `nvlx.io/fleet-protection`, preserves unrelated finalizers, and retains the existing rollback/quarantine/active-execution safety gates.
+- **Kubernetes Events.** Successful reconciles emit `events.k8s.io/v1` Events in `nvlx-system` (or the configured namespace) referencing the cluster-scoped GPUFleet UID.
+- **Lease CAS fencing.** `coordination.k8s.io/v1` Lease acquisition and renewal use `resourceVersion` CAS. Every mutation path rechecks leadership immediately before API writes.
+- **Graceful runtime loop.** SIGTERM/SIGINT stop new work; list/watch reconnects use bounded exponential backoff.
+- **Health and metrics server.** `/livez`, `/readyz`, and `/metrics` are served over HTTP. Readiness requires API reachability, current leadership, fresh inventory, and a non-terminating process.
+- **Production manifests.** Generated resources now include ServiceAccount, ClusterRole/Binding, two-replica Deployment, HTTP probes, PodDisruptionBudget, NetworkPolicy, non-root execution, read-only root filesystem, dropped capabilities, and RuntimeDefault seccomp.
+- **Fake-API integration tests.** CI exercises list→watch→status PATCH, conflict refetch/retry, leader-loss fencing, finalizer preservation, watch bookmark/410 relist, and Lease renewal against a local fake Kubernetes HTTP server.
 
 ## Safety invariants
 
-1. Fencing checkpoint sequences never move backward.
-2. A token change cannot occur without exactly one sequence advance.
-3. A sequence cannot advance when the fencing token is unchanged.
-4. Sequence gaps are fail-closed rather than inferred through.
-5. A persisted checkpoint older than an independently trusted minimum is treated as replayed state.
-6. All v0.1-v1.5.8 approval, rollback, Secure Boot, DRA, fabric, health/SLO, PSIRT, quarantine, audit, SBOM and provenance safeguards remain in force.
+1. A replica that cannot prove current Lease leadership does not mutate GPUFleet status or finalizers.
+2. Status conflicts are refetched before retry; stale `resourceVersion` is never blindly overwritten.
+3. Finalizer removal preserves unrelated finalizers and remains subject to rollback/quarantine/execution safety gates.
+4. Watch expiration causes relist from authoritative state.
+5. Authentication tokens are never included in API error messages.
+6. NVIDIA resources remain read-only in v1.6.0; no automatic driver/GPU Operator mutation or unsupported DRA migration is introduced.
+7. All v0.1-v1.5.9 approval, rollback, Secure Boot, DRA, fabric, health/SLO, PSIRT, quarantine, audit, SBOM, provenance, fencing and replay safeguards remain in force.

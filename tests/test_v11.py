@@ -27,7 +27,11 @@ class V11Tests(unittest.TestCase):
     def test_failed_execution_requires_rollback(self):
         self.assertTrue(finish(start("abc"),success=False).rollback_required)
     def test_ha_manifests_require_two_replicas(self):
-        self.assertEqual(len(manifests(replicas=2)),4)
+        resources=manifests(replicas=2)
+        kinds={x["kind"] for x in resources}
+        self.assertTrue({"ServiceAccount","ClusterRole","ClusterRoleBinding","Deployment"}.issubset(kinds))
+        deployment=next(x for x in resources if x["kind"]=="Deployment")
+        self.assertEqual(deployment["spec"]["replicas"],2)
         with self.assertRaises(ValueError): manifests(replicas=1)
 
 if __name__ == "__main__": unittest.main()
