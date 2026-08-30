@@ -29,20 +29,24 @@ jobs:
         run: python -m unittest discover -s tests -v
       - name: Reproducible archive smoke test
         run: |
-          python scripts/repro_release.py 1.6.1.7 --out /tmp/repro-a
-          python scripts/repro_release.py 1.6.1.7 --out /tmp/repro-b
+          python scripts/repro_release.py 1.6.1.8 --out /tmp/repro-a
+          python scripts/repro_release.py 1.6.1.8 --out /tmp/repro-b
           cmp /tmp/repro-a/SHA256SUMS /tmp/repro-b/SHA256SUMS
       - name: CLI smoke test
         run: |
-          nvlx --version | grep 1.6.1.7
+          nvlx --version | grep 1.6.1.8
           nvlx-operator --help | grep 'live GPUFleet Kubernetes operator'
           python - <<'PY'
           from nvlx.runtime_v16 import Runtime
           class C: pass
-          r=Runtime(C(),'pod-a',leader_check=lambda:False)
-          obj={'metadata':{'name':'prod','uid':'u1','resourceVersion':'opaque-a','generation':4}}
-          r._seed_watch_state_from_list([obj])
-          assert r._watch_event_disposition(obj,'MODIFIED') == 'duplicate'
-          assert r._watch_event_disposition(obj,'DELETED') == 'reconcile-delete'
-          assert r.reconcile_object(obj,event_type='DELETED') == 'deleted-observed'
+          r=Runtime(C(),'pod-a',watch_cache_limit=2)
+          a={'metadata':{'name':'a','uid':'a','resourceVersion':'opaque-a','generation':4}}
+          b={'metadata':{'name':'b','uid':'b','resourceVersion':'opaque-b','generation':1}}
+          c={'metadata':{'name':'c','uid':'c','resourceVersion':'opaque-c','generation':1}}
+          assert r._watch_event_disposition(a,'MODIFIED') == 'reconcile'
+          assert r._watch_event_disposition(b,'MODIFIED') == 'reconcile'
+          assert r._watch_event_disposition(c,'MODIFIED') == 'reconcile'
+          assert len(r._watch_seen) == 2 and r.stats.watch_cache_evictions == 1
+          r._prune_watch_state_from_list([c])
+          assert list(r._watch_seen) == ['c'] and r.stats.watch_cache_pruned == 1
           PY
