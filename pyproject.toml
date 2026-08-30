@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "nvlx"
-version = "1.6.5.8"
-description = "Real Kubernetes NVIDIA GPU fleet operator with contained HTTP framework errors, minimized server fingerprinting and fault-contained Prometheus export"
+version = "1.6.5.9"
+description = "Real Kubernetes NVIDIA GPU fleet operator with frozen Prometheus telemetry snapshots, contained HTTP errors and checkpoint reconciliation observability"
 readme = "README.md"
 requires-python = ">=3.11"
 license = {text = "MIT"}

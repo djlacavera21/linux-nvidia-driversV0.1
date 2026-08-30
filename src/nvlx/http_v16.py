@@ -19,6 +19,25 @@ class ReadinessSnapshot:
     terminating: bool
 
 
+@dataclass(frozen=True)
+class MetricsSnapshot:
+    """Frozen source values used to render one Prometheus response."""
+
+    readiness: ReadinessSnapshot
+    reconcile_total: int
+    reconcile_failures: int
+    checkpoint_writes: int
+    checkpoint_idempotent_acks: int
+    checkpoint_reconciled_commits: int
+    checkpoint_rollbacks: int
+    checkpoint_transaction_mismatches: int
+    checkpoint_failures: int
+    checkpoint_restore_attempts: int
+    checkpoint_restore_successes: int
+    checkpoint_sequence: int
+    checkpoint_epoch: int
+
+
 def _runtime_ready(runtime, stats) -> bool:
     """Use the runtime's readiness contract when available and fail closed on errors."""
     ready_fn = getattr(runtime, "ready", None)
@@ -118,6 +137,63 @@ def _readiness_snapshot(runtime, stats) -> ReadinessSnapshot:
     )
 
 
+def _metrics_snapshot(runtime, stats) -> MetricsSnapshot:
+    """Capture every mutable source used by one metrics response exactly once."""
+    readiness = _readiness_snapshot(runtime, stats)
+    return MetricsSnapshot(
+        readiness=readiness,
+        reconcile_total=stats.reconcile_total,
+        reconcile_failures=stats.reconcile_failures,
+        checkpoint_writes=getattr(runtime, "nvidia_checkpoint_writes", 0),
+        checkpoint_idempotent_acks=getattr(runtime, "nvidia_checkpoint_idempotent_acks", 0),
+        checkpoint_reconciled_commits=getattr(
+            runtime, "nvidia_checkpoint_reconciled_commits", 0
+        ),
+        checkpoint_rollbacks=getattr(runtime, "nvidia_checkpoint_rollbacks", 0),
+        checkpoint_transaction_mismatches=getattr(
+            runtime, "nvidia_checkpoint_transaction_mismatches", 0
+        ),
+        checkpoint_failures=getattr(runtime, "nvidia_checkpoint_failures", 0),
+        checkpoint_restore_attempts=getattr(
+            runtime, "nvidia_checkpoint_restore_attempts", 0
+        ),
+        checkpoint_restore_successes=getattr(
+            runtime, "nvidia_checkpoint_restore_successes", 0
+        ),
+        checkpoint_sequence=getattr(runtime, "nvidia_checkpoint_sequence", 0),
+        checkpoint_epoch=getattr(runtime, "nvidia_checkpoint_epoch", 0),
+    )
+
+
+def _render_metrics_snapshot(snapshot: MetricsSnapshot) -> str:
+    """Render Prometheus output using only a frozen capture, never live runtime state."""
+    readiness = snapshot.readiness
+    return render_metrics(
+        leader=readiness.leader,
+        reconcile_total=snapshot.reconcile_total,
+        reconcile_failures=snapshot.reconcile_failures,
+        pending_approvals=0,
+        rollback_required=0,
+        controller_ready=readiness.controller_ready,
+        api_reachable=readiness.api_reachable,
+        leadership_fresh=readiness.leadership_fresh,
+        inventory_fresh=readiness.inventory_fresh,
+        nvidia_preflight_ready=readiness.nvidia_preflight_ready,
+        terminating=readiness.terminating,
+        checkpoint_writes=snapshot.checkpoint_writes,
+        checkpoint_idempotent_acks=snapshot.checkpoint_idempotent_acks,
+        checkpoint_reconciled_commits=snapshot.checkpoint_reconciled_commits,
+        checkpoint_rollbacks=snapshot.checkpoint_rollbacks,
+        checkpoint_transaction_mismatches=snapshot.checkpoint_transaction_mismatches,
+        checkpoint_failures=snapshot.checkpoint_failures,
+        checkpoint_restore_attempts=snapshot.checkpoint_restore_attempts,
+        checkpoint_restore_successes=snapshot.checkpoint_restore_successes,
+        checkpoint_sequence=snapshot.checkpoint_sequence,
+        checkpoint_epoch=snapshot.checkpoint_epoch,
+        checkpoint_ready=readiness.checkpoint_ready,
+    )
+
+
 class HealthServer:
     def __init__(self, runtime, host: str = "0.0.0.0", port: int = 8080):
         self.runtime = runtime
@@ -169,40 +245,9 @@ class HealthServer:
                     )
                     return
                 if self.path == "/metrics":
-                    snapshot = _readiness_snapshot(runtime, s)
                     try:
-                        body = render_metrics(
-                            leader=snapshot.leader,
-                            reconcile_total=s.reconcile_total,
-                            reconcile_failures=s.reconcile_failures,
-                            pending_approvals=0,
-                            rollback_required=0,
-                            controller_ready=snapshot.controller_ready,
-                            api_reachable=snapshot.api_reachable,
-                            leadership_fresh=snapshot.leadership_fresh,
-                            inventory_fresh=snapshot.inventory_fresh,
-                            nvidia_preflight_ready=snapshot.nvidia_preflight_ready,
-                            terminating=snapshot.terminating,
-                            checkpoint_writes=getattr(runtime, "nvidia_checkpoint_writes", 0),
-                            checkpoint_idempotent_acks=getattr(runtime, "nvidia_checkpoint_idempotent_acks", 0),
-                            checkpoint_reconciled_commits=getattr(
-                                runtime, "nvidia_checkpoint_reconciled_commits", 0
-                            ),
-                            checkpoint_rollbacks=getattr(runtime, "nvidia_checkpoint_rollbacks", 0),
-                            checkpoint_transaction_mismatches=getattr(
-                                runtime, "nvidia_checkpoint_transaction_mismatches", 0
-                            ),
-                            checkpoint_failures=getattr(runtime, "nvidia_checkpoint_failures", 0),
-                            checkpoint_restore_attempts=getattr(
-                                runtime, "nvidia_checkpoint_restore_attempts", 0
-                            ),
-                            checkpoint_restore_successes=getattr(
-                                runtime, "nvidia_checkpoint_restore_successes", 0
-                            ),
-                            checkpoint_sequence=getattr(runtime, "nvidia_checkpoint_sequence", 0),
-                            checkpoint_epoch=getattr(runtime, "nvidia_checkpoint_epoch", 0),
-                            checkpoint_ready=snapshot.checkpoint_ready,
-                        )
+                        snapshot = _metrics_snapshot(runtime, s)
+                        body = _render_metrics_snapshot(snapshot)
                     except Exception:
                         self._send_text(500, "metrics unavailable\n")
                         return
