@@ -1,29 +1,36 @@
-# nvlx: Linux-NVIDIA-Driver v1.6.2.9
+# nvlx: Linux-NVIDIA-Driver v1.6.3
 
-`nvlx` v1.6.2.9 is a narrow post-1.6.2.8 runtime-integrity hotfix. It makes relist establishment atomic: the operator will not mark inventory fresh or open a watch if any object from the trusted list snapshot failed to reach a settled reconciliation outcome.
+`nvlx` v1.6.3 is the next live-runtime milestone after the v1.6.2.x hardening train. It adds a Kubernetes-native, read-only NVIDIA inventory and preflight layer in front of GPUFleet reconciliation while preserving the existing NVIDIA mutation boundary.
 
 > [!IMPORTANT]
-> NVIDIA resource changes remain read-only in v1.6.2.9. The operator mutates only nvlx-owned GPUFleet status/finalizers plus its Lease and Events; driver/GPU Operator mutation remains deferred.
+> NVIDIA driver/GPU Operator resources remain read-only in v1.6.3. The operator still mutates only nvlx-owned GPUFleet status/finalizers plus its Lease and Events. Live NVIDIA configuration changes remain deferred.
 
-## v1.6.2.9 hotfixes
+## v1.6.3 live NVIDIA inventory
 
-- **Atomic relist settlement barrier.** Every object in a trusted GPUFleet list snapshot must settle before that snapshot can establish a watch continuity window.
-- **No partial-snapshot watch.** If even one list object returns `standby`, `fenced`, `finalizer-hold`, or another deferred result, the runtime returns `relist` without opening the watch stream.
-- **Inventory freshness stays false.** A partially reconciled list cannot transiently advertise fresh inventory.
-- **No partial dedupe seeding.** Deferred relists do not seed settled siblings into the watch cache; the next trusted relist starts from a coherent snapshot rather than mixed continuity state.
-- **Cycle-local barrier reset.** The deferred flag resets before each new list/watch attempt, allowing a later fully settled relist to establish continuity normally.
-- **Settlement-bound cursor retained.** v1.6.2.8 cursor rollback, deferred-event relist, BOOKMARK overrun prevention, stale-generation fencing, and opaque resourceVersion semantics remain active.
-- **Prior safeguards retained.** Retry-safe watch dedupe, semantic duplicate-free finalizer preservation, generation-bound mutation verification, corrupt-watch relists, inventory/leadership freshness invalidation, token-file auth, bounded watch cache, and verified Lease writes remain active.
+- **Multi-version Kubernetes API discovery.** The operator discovers every served version of `nvidia.com` and `resource.nvidia.com`, then maps each resource to a served version instead of assuming all NVIDIA CRDs share one API version.
+- **GPU Operator control-plane inventory.** Read-only snapshots include `GPUCluster`, `ClusterPolicy`, and `NVIDIADriver` resources.
+- **DRA inventory.** When served, snapshots include `ComputeDomain` and `ComputeDomainClique` resources from `resource.nvidia.com`.
+- **GPU node inventory.** Kubernetes Nodes carrying `nvidia.com/gpu.present=true` are included in the normalized snapshot.
+- **GPUCluster/ClusterPolicy exclusion.** A cluster exposing both control planes fails preflight closed.
+- **GPUCluster singleton enforcement.** A discovered GPUCluster must be the singleton `gpu-cluster` resource.
+- **Control-plane readiness checks.** Explicit non-ready states reported by GPUCluster, ClusterPolicy, or NVIDIADriver block preflight.
+- **Default-driver consistency.** More than one default NVIDIADriver fails preflight.
+- **Unmanaged-GPU detection.** GPU nodes with neither GPUCluster nor ClusterPolicy block preflight rather than being treated as safely unmanaged.
+- **ComputeDomain API validation.** If GPUCluster explicitly enables ComputeDomains, the `resource.nvidia.com/computedomains` API must be served.
+- **Runtime gating.** NVIDIA preflight runs before each GPUFleet list/watch continuity attempt. A failed or unreadable NVIDIA inventory prevents the GPUFleet cycle from starting and keeps readiness false.
+- **Read-only RBAC expansion.** `resource.nvidia.com` resources and core Nodes receive only `get`, `list`, and `watch`; no NVIDIA write verbs are introduced.
 
 ## Safety invariants
 
-1. A list snapshot cannot establish inventory freshness or a watch unless every listed GPUFleet reaches a settled reconciliation outcome.
-2. One deferred list object makes the entire relist continuity attempt fail closed.
-3. A failed relist opens no watch stream and seeds no partial watch-cache state.
-4. The next cycle must obtain a fresh trusted list before watch continuity can be re-established.
-5. State-bearing watch deliveries remain settlement-bound and deferred watch work still forces relist before later events or BOOKMARKs are consumed.
-6. Kubernetes `resourceVersion` remains opaque and is never numerically or lexically ordered.
-7. Leadership freshness and inventory freshness remain independent readiness requirements.
-8. Conflict retries remain bounded and leadership-fenced.
-9. NVIDIA resources remain read-only in v1.6.2.9.
-10. All v0.1-v1.6.2.8 approval, rollback, Secure Boot, DRA, fabric, health/SLO, PSIRT, quarantine, audit, SBOM, provenance, fencing, replay, UID-integrity, Lease-CAS, leadership-freshness, inventory-continuity, watch-trust, generation-verification, semantic-finalizer, retry-safe-watch, and settlement-bound-cursor safeguards remain in force.
+1. NVIDIA API discovery is fail closed on malformed or contradictory discovery data.
+2. The runtime never guesses one API version for every NVIDIA CRD; each resource is resolved against a served group version.
+3. GPUCluster and ClusterPolicy cannot coexist in an accepted preflight.
+4. GPUCluster must be the singleton named `gpu-cluster`.
+5. Explicit non-ready NVIDIA control-plane or driver state blocks GPUFleet continuity establishment.
+6. GPU nodes without a recognized GPU Operator control plane block preflight.
+7. NVIDIA inventory permissions remain read-only: `get`, `list`, and `watch` only.
+8. NVIDIA preflight must pass before a new GPUFleet list/watch cycle begins.
+9. The v1.6.2.9 atomic relist settlement barrier remains active after NVIDIA preflight succeeds.
+10. Settlement-bound cursor handling, retry-safe watch dedupe, semantic finalizer verification, generation-bound mutation verification, Lease freshness, leadership invalidation, token-file auth, bounded watch cache, and opaque `resourceVersion` semantics remain active.
+11. No automatic ClusterPolicy↔GPUCluster or Device Plugin↔DRA migration is introduced.
+12. NVIDIA driver/GPU Operator resources remain read-only in v1.6.3.
