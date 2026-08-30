@@ -1,32 +1,28 @@
-# nvlx: Linux-NVIDIA-Driver v1.6.2
+# nvlx: Linux-NVIDIA-Driver v1.6.2.1
 
-`nvlx` v1.6.2 is the first broader runtime-hardening release after the v1.6.1.x patch train. It preserves the current Kubernetes API surface and NVIDIA read-only boundary while closing stale conflict-retry behavior, adding conflict-safe finalizer recovery, bounding watch lifetimes, hardening bearer-token input, and verifying Lease ownership after Kubernetes writes.
+`nvlx` v1.6.2.1 is a narrow post-1.6.2 runtime-safety hotfix. It preserves the Kubernetes API surface and NVIDIA read-only boundary while tightening Lease freshness semantics and making readiness depend on recently verified leadership rather than a sticky leader boolean.
 
 > [!IMPORTANT]
-> NVIDIA resource changes remain read-only in v1.6.2. The operator mutates only nvlx-owned GPUFleet status/finalizers plus its Lease and Events; driver/GPU Operator mutation remains deferred.
+> NVIDIA resource changes remain read-only in v1.6.2.1. The operator mutates only nvlx-owned GPUFleet status/finalizers plus its Lease and Events; driver/GPU Operator mutation remains deferred.
 
-## v1.6.2 hardening
+## v1.6.2.1 hotfixes
 
-- **True status conflict recomputation.** A `409`/`412` status conflict triggers one fresh GPUFleet GET. The runtime verifies the same name/UID incarnation, rejects deletion or approval transitions, recomputes the operator plan against the fresh generation/resourceVersion, rechecks live leadership, and performs at most one retry.
-- **Fresh-generation status.** A same-UID generation increase can now retry with a recomputed status whose `observed_generation` matches the fresh object instead of replaying stale status or blindly fencing every generation change.
-- **Approval/deletion conflict fencing.** If approval state changes or deletion begins during conflict recovery, the original status mutation is abandoned rather than translated into a new write inside the stale reconcile attempt.
-- **Finalizer conflict recovery.** Finalizer `409`/`412` responses now refetch the same UID, recompute rollback/quarantine/active-execution safety from the fresh object, preserve the fresh unrelated finalizer list exactly, recheck leadership, and retry at most once.
-- **Bounded Kubernetes watches.** Normal API requests and watch socket reads have separate timeouts. Watch URLs include Kubernetes `timeoutSeconds`, while the client socket timeout must be longer than the server-side watch lifetime.
-- **Safer bearer-token input.** `nvlx-operator` adds `--token-file` as a mutually exclusive alternative to `--token`, avoiding bearer tokens in normal process argument listings. In-cluster mode continues to use the mounted service-account token.
-- **Verified Lease ownership.** Lease create/renew/takeover succeeds only when the Kubernetes response contains a non-empty resourceVersion, the expected holder identity and duration, valid transition state, and a fresh timestamp.
-- **Lease state fail-closed checks.** Malformed Lease bodies, invalid transition counters, missing resourceVersion, fresh competing holders, CAS conflicts, and unverifiable write responses all return non-leader state.
-- **Expanded regression coverage.** Tests cover generation-aware status recomputation, approval/deletion conflict fencing, finalizer conflict recovery and safety changes, watch timeout configuration, token-file handling, Lease creation, competing-holder refusal, stale takeover, and CAS failure.
+- **Future-dated Lease fencing.** Lease `renewTime`/`acquireTime` values more than the configured clock-skew allowance ahead of local UTC time are rejected as fresh instead of extending leadership indefinitely.
+- **Timezone fail-closed handling.** Naive or malformed Lease timestamps do not participate in freshness decisions.
+- **Verified-readiness window.** The operator runtime records the monotonic time of its last successful live leadership verification. `/readyz` requires that verification to remain within the configured freshness window.
+- **Stale leader demotion.** If the local verified-leadership window expires, readiness fails and the local runtime leader flag is cleared rather than remaining sticky.
+- **Empty-cluster Lease renewal.** Every relist now probes leadership before list/watch processing, so a cluster with zero GPUFleet objects still renews/verifies the controller Lease.
+- **Lease-safe watch cadence.** `nvlx-operator` defaults to Kubernetes `timeoutSeconds=20` with a 25-second client watch socket timeout, staying below the default 30-second Lease duration while preserving the required socket-over-server timeout margin.
+- **Prior v1.6.2 safeguards retained.** Conflict-safe status recomputation, conflict-safe finalizer recovery, UID-bound mutation verification, token-file authentication, bounded watch state, opaque resourceVersion semantics, and verified Lease write responses remain active.
 
 ## Safety invariants
 
-1. Status conflict recovery never replays a pre-conflict status payload against a fresh generation.
-2. A changed GPUFleet UID, approval transition, or newly deleting object fences status retry.
-3. Finalizer conflict recovery re-evaluates fresh safety state and preserves unrelated finalizers from the fresh object.
-4. Conflict retries are bounded to one retry and recheck live Lease leadership immediately before mutation.
-5. Kubernetes `resourceVersion` remains opaque and is used only as an equality/CAS token, never numerically or lexically ordered.
-6. Watches have an explicit server lifetime and a longer client-side socket timeout.
-7. External bearer tokens can be loaded from a file instead of being exposed in normal CLI argument listings.
-8. Lease leadership is accepted only after a verifiable Kubernetes response proves this identity holds a fresh Lease.
-9. GPUFleet UID identity, bounded/pruned watch caching, deferred-reconcile retry preservation, Event attribution, mutation-response verification, reflected-token redaction, deterministic reconnects, and shutdown fencing remain active.
-10. NVIDIA resources remain read-only in v1.6.2.
-11. All v0.1-v1.6.1.9 approval, rollback, Secure Boot, DRA, fabric, health/SLO, PSIRT, quarantine, audit, SBOM, provenance, fencing, replay and Lease-CAS safeguards remain in force.
+1. A Lease timestamp cannot be considered fresh solely because it is arbitrarily far in the future.
+2. Lease freshness uses timezone-aware timestamps and a bounded explicit skew allowance.
+3. Readiness requires a recent successful live leadership verification, not only `stats.leader == true`.
+4. Quiet or empty GPUFleet clusters still renew leadership once per relist cycle.
+5. The default watch lifetime is shorter than the default Lease duration.
+6. Kubernetes `resourceVersion` remains opaque and is never numerically or lexically ordered.
+7. Conflict retries remain bounded and leadership-fenced.
+8. NVIDIA resources remain read-only in v1.6.2.1.
+9. All v0.1-v1.6.2 approval, rollback, Secure Boot, DRA, fabric, health/SLO, PSIRT, quarantine, audit, SBOM, provenance, fencing, replay, UID-integrity and Lease-CAS safeguards remain in force.
