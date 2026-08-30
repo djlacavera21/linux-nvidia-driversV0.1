@@ -29,19 +29,19 @@ jobs:
         run: python -m unittest discover -s tests -v
       - name: Reproducible archive smoke test
         run: |
-          python scripts/repro_release.py 1.6.2.1 --out /tmp/repro-a
-          python scripts/repro_release.py 1.6.2.1 --out /tmp/repro-b
+          python scripts/repro_release.py 1.6.2.2 --out /tmp/repro-a
+          python scripts/repro_release.py 1.6.2.2 --out /tmp/repro-b
           cmp /tmp/repro-a/SHA256SUMS /tmp/repro-b/SHA256SUMS
       - name: CLI smoke test
         run: |
-          nvlx --version | grep 1.6.2.1
+          nvlx --version | grep 1.6.2.2
           nvlx-operator --help | grep 'live GPUFleet Kubernetes operator'
           nvlx-operator --help | grep -- '--token-file'
           nvlx-operator --help | grep -- '--watch-timeout-seconds'
           python - <<'PY'
           from datetime import datetime, timedelta, timezone
           from nvlx.lease_v16 import LeaseElector
-          from nvlx.runtime_v1621 import Runtime
+          from nvlx.runtime_v1622 import Runtime
           class C:
               def list_fleets(self):
                   from nvlx.k8s_api_v16 import ApiResponse
@@ -53,4 +53,8 @@ jobs:
           assert not e._fresh({'renewTime':(now+timedelta(seconds=6)).isoformat().replace('+00:00','Z'),'leaseDurationSeconds':30},now)
           r=Runtime(C(),'pod-a',leader_check=lambda:True,leader_fresh_seconds=25)
           assert r.list_and_watch_once() == 'eof' and r.ready()
+          assert r._leader_verified_monotonic > 0
+          r.stats.api_reachable=False
+          assert not r.ready()
+          assert not r.stats.leader and r._leader_verified_monotonic == 0.0
           PY
