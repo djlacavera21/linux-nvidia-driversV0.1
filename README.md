@@ -1,26 +1,26 @@
-# nvlx: Linux-NVIDIA-Driver v1.5.7
+# nvlx: Linux-NVIDIA-Driver v1.5.8
 
-`nvlx` v1.5.7 is a seventh stabilization patch for the live Kubernetes operator. It adds integrity-checked persisted fencing state and rollback-aware startup recovery so a restarted controller cannot regain mutation authority from tampered, stale, or logically regressed Lease state.
+`nvlx` v1.5.8 is an eighth stabilization patch for the live Kubernetes operator. It makes persisted fencing state monotonic so a stale disk snapshot, same-epoch holder collision, or reacquisition that fails to advance leadership cannot re-enter the controller mutation path.
 
 > [!IMPORTANT]
-> Persisted fencing state remains evidence only. A restored token must pass file-integrity verification and then match the live Lease holder, fencing epoch, Lease `resourceVersion`, and freshness before controller-owned mutation is allowed.
+> Persisted fencing state remains evidence only. Integrity verification, live Lease validation, leadership freshness, and monotonic fencing checks all have to pass before controller-owned mutation authority can continue.
 
-## v1.5.7 fixes
+## v1.5.8 fixes
 
-- **Integrity envelope.** Newly persisted fence tokens are wrapped in a versioned SHA-256 integrity envelope and verified before reload.
-- **Durability tightening.** Fence-state replacement now also `fsync`s the containing directory after atomic replacement.
-- **Legacy compatibility.** Existing v1.5.6 token files remain readable, but newly written state uses the integrity envelope.
-- **Tamper detection.** A modified token whose integrity digest no longer matches fails closed instead of being accepted at startup.
-- **Rollback-aware recovery.** Startup distinguishes exact restoration, older persisted epochs that require reacquisition, and a live Lease epoch lower than persisted state, which is surfaced as `rollback-detected`.
-- **Live revalidation.** Even integrity-valid persisted state must exactly match current Lease holder/epoch/resourceVersion/freshness before mutation authority is restored.
-- **Regression coverage.** Tests cover tampered envelopes, legacy state, exact restore, newer-epoch reacquisition, missing state, and epoch rollback detection.
-- **1.5.6 retained.** Atomic persistence, renewal-race fencing, stale-leader blocking, fence-drain behavior, duplicate-event suppression, bounded jitter, ordered finalization, and status-write idempotency remain active.
+- **Monotonic fence persistence.** A candidate fencing token with an epoch lower than the persisted epoch is rejected as `reject-rollback`.
+- **Same-epoch holder collision protection.** A holder change without a fencing-epoch advance is rejected as `reject-epoch-collision` rather than being persisted.
+- **Renewal-safe persistence.** The current holder may persist a new Lease `resourceVersion` within the same epoch after a validated renewal.
+- **Duplicate persistence suppression.** Rewriting an identical fencing token becomes a `noop` instead of another disk mutation.
+- **Guarded reacquisition.** A reacquired leadership token must advance beyond the previously persisted fencing epoch; same-epoch reacquisition is rejected as stale.
+- **New-epoch handoff.** A valid newer epoch may persist a new holder and resourceVersion as `persist-new-epoch`.
+- **Regression coverage.** Tests cover epoch rollback, same-epoch holder collision, same-epoch renewal, duplicate tokens, stale reacquisition, newer-epoch handoff, and startup rollback detection.
+- **1.5.7 retained.** Integrity envelopes, directory fsync, legacy 1.5.6 state compatibility, rollback-aware startup recovery, live Lease revalidation, renewal-race fencing and stale-leader blocking remain active.
 
 ## Safety invariants
 
-1. Integrity-valid persisted state still cannot authorize mutation without live Lease revalidation.
-2. Tampered or malformed persisted fencing state fails closed.
-3. A newer live leadership epoch invalidates an older persisted token and forces reacquisition.
-4. A live leadership epoch lower than the persisted epoch is treated as a rollback condition, not silently accepted.
-5. Directory metadata is flushed after atomic fence-state replacement to tighten crash durability.
-6. All v0.1-v1.5.6 approval, rollback, Secure Boot, DRA, fabric, health/SLO, PSIRT, quarantine, audit, SBOM and provenance safeguards remain in force.
+1. Persisted fencing epochs never move backward.
+2. A Lease holder cannot change inside the same fencing epoch and retain mutation authority.
+3. Normal renewal may update resourceVersion only for the same holder and epoch after live validation.
+4. Reacquisition must advance the fencing epoch before new authority can be persisted.
+5. Identical fencing state does not trigger redundant persistence.
+6. All v0.1-v1.5.7 approval, rollback, Secure Boot, DRA, fabric, health/SLO, PSIRT, quarantine, audit, SBOM and provenance safeguards remain in force.
