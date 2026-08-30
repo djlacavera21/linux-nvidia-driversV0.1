@@ -63,6 +63,43 @@ class Runtime:
             if name is not None and name != expected_name: return None
         return meta
 
+    @classmethod
+    def _status_response_verified(cls, response: ApiResponse | None, expected_name: str, expected_status: dict) -> bool:
+        if cls._response_meta(response,expected_name) is None or not isinstance(response.body,dict): return False
+        returned=response.body.get("status")
+        if not isinstance(returned,dict): return False
+        for key,value in expected_status.items():
+            if returned.get(key) != value: return False
+        return True
+
+    @classmethod
+    def _finalizer_response_verified(cls, response: ApiResponse | None, expected_name: str) -> bool:
+        meta=cls._response_meta(response,expected_name)
+        if meta is None: return False
+        finalizers=meta.get("finalizers")
+        if not isinstance(finalizers,list) or not all(isinstance(x,str) for x in finalizers): return False
+        return PROTECTIVE_FINALIZER not in finalizers
+
+    @staticmethod
+    def _conflict_refetch_matches(fresh: object, original_meta: dict) -> tuple[bool,str]:
+        if not isinstance(fresh,dict): return False,""
+        meta=fresh.get("metadata")
+        if not isinstance(meta,dict): return False,""
+        expected_name=original_meta.get("name")
+        expected_uid=original_meta.get("uid")
+        expected_generation=original_meta.get("generation",0)
+        name=meta.get("name")
+        uid=meta.get("uid")
+        rv=meta.get("resourceVersion")
+        generation=meta.get("generation",0)
+        if name != expected_name: return False,""
+        if expected_uid and uid != expected_uid: return False,""
+        try:
+            if int(generation or 0) != int(expected_generation or 0): return False,""
+        except (TypeError,ValueError): return False,""
+        if not isinstance(rv,str) or not rv: return False,""
+        return True,rv
+
     def _event(self, obj: dict, reason: str, note: str) -> bool:
         meta=obj.get("metadata",{}); name=meta.get("name",""); uid=meta.get("uid","")
         if not name or not uid or self.stats.terminating or not self._leader(): return False
@@ -79,16 +116,14 @@ class Runtime:
             if not self._leader(): return False
             try:
                 response=self.client.patch_status(name,rv,status)
-                return self._response_meta(response,name) is not None
+                return self._status_response_verified(response,name,status)
             except ApiError as e:
                 if e.status not in {409,412}: raise
                 if not self._leader(): return False
-                fresh=self.client.get_fleet(name).body
-                if not isinstance(fresh,dict): return False
-                fresh_meta=fresh.get("metadata")
-                if not isinstance(fresh_meta,dict): return False
-                rv=fresh_meta.get("resourceVersion","")
-                if not isinstance(rv,str) or not rv: return False
+                response=self.client.get_fleet(name)
+                fresh=response.body if response is not None else None
+                matches,rv=self._conflict_refetch_matches(fresh,meta)
+                if not matches: return False
         return False
 
     def _finalize(self, obj: dict) -> bool:
@@ -102,7 +137,7 @@ class Runtime:
         remaining=[x for x in finalizers if x != PROTECTIVE_FINALIZER]
         try:
             response=self.client.patch_finalizers(meta.get("name",""),meta.get("resourceVersion",""),remaining)
-            return self._response_meta(response,meta.get("name","")) is not None
+            return self._finalizer_response_verified(response,meta.get("name",""))
         except ApiError as e:
             if e.status in {409,412,404,410}: return False
             raise
