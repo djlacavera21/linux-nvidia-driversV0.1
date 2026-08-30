@@ -137,17 +137,33 @@ def _readiness_snapshot(runtime, stats) -> ReadinessSnapshot:
     )
 
 
+def _strict_bool_field(diagnosis, name: str) -> bool:
+    value = getattr(diagnosis, name)
+    if type(value) is not bool:
+        raise TypeError(f"diagnosis field {name} must be bool")
+    return value
+
+
+def _strict_int_field(diagnosis, name: str) -> int:
+    value = getattr(diagnosis, name)
+    if type(value) is not int:
+        raise TypeError(f"diagnosis field {name} must be int")
+    return value
+
+
 def _coerce_readiness_diagnosis(diagnosis) -> ReadinessSnapshot:
-    """Normalize a runtime-owned typed diagnosis to the HTTP presentation shape."""
+    """Validate a runtime-owned diagnosis and normalize it to the HTTP presentation shape."""
     return ReadinessSnapshot(
-        controller_ready=bool(diagnosis.controller_ready),
-        api_reachable=bool(diagnosis.api_reachable),
-        leader=bool(diagnosis.leader),
-        leadership_fresh=bool(diagnosis.leadership_fresh),
-        inventory_fresh=bool(diagnosis.inventory_fresh),
-        nvidia_preflight_ready=bool(diagnosis.nvidia_preflight_ready),
-        checkpoint_ready=bool(diagnosis.checkpoint_ready),
-        terminating=bool(diagnosis.terminating),
+        controller_ready=_strict_bool_field(diagnosis, "controller_ready"),
+        api_reachable=_strict_bool_field(diagnosis, "api_reachable"),
+        leader=_strict_bool_field(diagnosis, "leader"),
+        leadership_fresh=_strict_bool_field(diagnosis, "leadership_fresh"),
+        inventory_fresh=_strict_bool_field(diagnosis, "inventory_fresh"),
+        nvidia_preflight_ready=_strict_bool_field(
+            diagnosis, "nvidia_preflight_ready"
+        ),
+        checkpoint_ready=_strict_bool_field(diagnosis, "checkpoint_ready"),
+        terminating=_strict_bool_field(diagnosis, "terminating"),
     )
 
 
@@ -200,21 +216,31 @@ def _metrics_snapshot(runtime, stats) -> MetricsSnapshot:
 
 
 def _coerce_metrics_diagnosis(diagnosis) -> MetricsSnapshot:
-    """Normalize a runtime-owned metrics diagnosis without consulting live runtime state."""
+    """Strictly validate runtime-owned metrics diagnosis without live-state fallback."""
     return MetricsSnapshot(
         readiness=_coerce_readiness_diagnosis(diagnosis.readiness),
-        reconcile_total=diagnosis.reconcile_total,
-        reconcile_failures=diagnosis.reconcile_failures,
-        checkpoint_writes=diagnosis.checkpoint_writes,
-        checkpoint_idempotent_acks=diagnosis.checkpoint_idempotent_acks,
-        checkpoint_reconciled_commits=diagnosis.checkpoint_reconciled_commits,
-        checkpoint_rollbacks=diagnosis.checkpoint_rollbacks,
-        checkpoint_transaction_mismatches=diagnosis.checkpoint_transaction_mismatches,
-        checkpoint_failures=diagnosis.checkpoint_failures,
-        checkpoint_restore_attempts=diagnosis.checkpoint_restore_attempts,
-        checkpoint_restore_successes=diagnosis.checkpoint_restore_successes,
-        checkpoint_sequence=diagnosis.checkpoint_sequence,
-        checkpoint_epoch=diagnosis.checkpoint_epoch,
+        reconcile_total=_strict_int_field(diagnosis, "reconcile_total"),
+        reconcile_failures=_strict_int_field(diagnosis, "reconcile_failures"),
+        checkpoint_writes=_strict_int_field(diagnosis, "checkpoint_writes"),
+        checkpoint_idempotent_acks=_strict_int_field(
+            diagnosis, "checkpoint_idempotent_acks"
+        ),
+        checkpoint_reconciled_commits=_strict_int_field(
+            diagnosis, "checkpoint_reconciled_commits"
+        ),
+        checkpoint_rollbacks=_strict_int_field(diagnosis, "checkpoint_rollbacks"),
+        checkpoint_transaction_mismatches=_strict_int_field(
+            diagnosis, "checkpoint_transaction_mismatches"
+        ),
+        checkpoint_failures=_strict_int_field(diagnosis, "checkpoint_failures"),
+        checkpoint_restore_attempts=_strict_int_field(
+            diagnosis, "checkpoint_restore_attempts"
+        ),
+        checkpoint_restore_successes=_strict_int_field(
+            diagnosis, "checkpoint_restore_successes"
+        ),
+        checkpoint_sequence=_strict_int_field(diagnosis, "checkpoint_sequence"),
+        checkpoint_epoch=_strict_int_field(diagnosis, "checkpoint_epoch"),
     )
 
 

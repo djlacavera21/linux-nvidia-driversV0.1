@@ -8,6 +8,16 @@ from .nvidia_checkpoint_v1651 import LeaseCheckpointStore
 from .runtime_v1652 import Runtime as RuntimeV1652
 
 
+def _require_bool(name: str, value) -> None:
+    if type(value) is not bool:
+        raise TypeError(f"{name} must be bool")
+
+
+def _require_int(name: str, value) -> None:
+    if type(value) is not int:
+        raise TypeError(f"{name} must be int")
+
+
 @dataclass(frozen=True)
 class ReadinessDiagnosis:
     """One authoritative readiness decision plus its post-evaluation gate state."""
@@ -20,6 +30,19 @@ class ReadinessDiagnosis:
     nvidia_preflight_ready: bool
     checkpoint_ready: bool
     terminating: bool
+
+    def __post_init__(self) -> None:
+        for name in (
+            "controller_ready",
+            "api_reachable",
+            "leader",
+            "leadership_fresh",
+            "inventory_fresh",
+            "nvidia_preflight_ready",
+            "checkpoint_ready",
+            "terminating",
+        ):
+            _require_bool(name, getattr(self, name))
 
 
 @dataclass(frozen=True)
@@ -39,6 +62,25 @@ class MetricsDiagnosis:
     checkpoint_restore_successes: int
     checkpoint_sequence: int
     checkpoint_epoch: int
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.readiness, ReadinessDiagnosis):
+            raise TypeError("readiness must be ReadinessDiagnosis")
+        for name in (
+            "reconcile_total",
+            "reconcile_failures",
+            "checkpoint_writes",
+            "checkpoint_idempotent_acks",
+            "checkpoint_reconciled_commits",
+            "checkpoint_rollbacks",
+            "checkpoint_transaction_mismatches",
+            "checkpoint_failures",
+            "checkpoint_restore_attempts",
+            "checkpoint_restore_successes",
+            "checkpoint_sequence",
+            "checkpoint_epoch",
+        ):
+            _require_int(name, getattr(self, name))
 
 
 class Runtime(RuntimeV1652):

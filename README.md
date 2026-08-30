@@ -1,42 +1,45 @@
-# nvlx: Linux-NVIDIA-Driver v1.6.6
+# nvlx: Linux-NVIDIA-Driver v1.6.6.1
 
-`nvlx` v1.6.6 moves readiness and Prometheus source diagnosis into the live runtime itself, so the HTTP layer presents typed runtime-owned snapshots instead of reaching into private readiness/checkpoint fields.
+`nvlx` v1.6.6.1 hardens the runtime-owned typed observability boundary introduced in v1.6.6 by rejecting malformed diagnosis field types instead of accepting Python truthiness or implicit metric coercion.
 
 > [!IMPORTANT]
 > NVIDIA driver/GPU Operator resources remain read-only. The operator still mutates only nvlx-owned GPUFleet status/finalizers plus its existing Lease and Events.
 
-## v1.6.6 runtime-owned typed observability diagnosis
+## v1.6.6.1 strict diagnosis contract validation
 
-- **The runtime now owns readiness diagnosis.** `runtime_v166.Runtime.readiness_diagnosis()` returns a frozen `ReadinessDiagnosis` containing the authoritative readiness result plus API, leadership, Lease freshness, inventory, NVIDIA preflight, checkpoint and termination gates.
-- **The runtime now owns metrics source capture.** `metrics_diagnosis()` returns a frozen `MetricsDiagnosis` containing the readiness diagnosis, reconcile totals and all exported checkpoint telemetry.
-- **Authoritative readiness is evaluated once per diagnosis.** The existing `ready()` chain remains authoritative and is invoked once before the post-evaluation gate state is captured.
-- **Checkpoint diagnosis no longer invokes the checkpoint gate twice.** After authoritative readiness has evaluated `_checkpoint_ready()`, the runtime observes loaded/stale checkpoint state directly for diagnostics instead of calling the gate again.
-- **HTTP becomes presentation-oriented for the live runtime.** `/readyz` and `/metrics` prefer runtime-owned diagnosis methods and normalize only their returned typed values; the live path no longer requires direct HTTP knowledge of Lease timestamps, checkpoint internals or runtime stats.
-- **Legacy runtime compatibility remains.** Existing HTTP readiness/metrics helpers remain as a fallback for older or custom runtimes that do not implement the v1.6.6 diagnosis contract.
-- **Frozen scrape behavior remains intact.** Prometheus rendering still occurs from one immutable capture and never rereads live sources during rendering.
-- **Existing transport hardening remains intact.** `Server: nvlx`, no-store caching, byte-accurate UTF-8 framing, deterministic exporter `500` handling and framework-error containment are unchanged.
-- **Checkpoint semantics are unchanged.** Per-call commit receipts, canonical digest proof, transport-ambiguity recovery, reconciliation telemetry, rollback fencing, replay floors and Lease-epoch validation retain their established behavior.
-- **No RBAC expansion.** This release changes observability ownership, operator runtime wiring, tests, package metadata and documentation only.
+- **Typed readiness fields are now strict booleans.** `ReadinessDiagnosis` rejects strings, integers and other truthy/falsy values for controller, API, leadership, inventory, preflight, checkpoint and termination gates.
+- **Typed metrics fields are now strict integers.** `MetricsDiagnosis` rejects stringified numbers, floats and booleans for exported reconcile/checkpoint telemetry.
+- **Nested diagnosis shape is validated.** Built-in `MetricsDiagnosis` requires a real `ReadinessDiagnosis`, preventing malformed nested readiness objects from being accepted by the runtime contract.
+- **HTTP independently validates diagnosis-shaped objects.** Custom runtimes that expose `readiness_diagnosis()` or `metrics_diagnosis()` cannot bypass the contract merely by returning objects with similarly named attributes.
+- **No permissive truthiness at the typed boundary.** Values such as `"false"` no longer become readiness `True` through Python's `bool()` conversion.
+- **Malformed readiness diagnoses fail closed.** `/readyz` returns the established `503 not ready` response and does not fall back to live runtime internals once a runtime has opted into the diagnosis API.
+- **Malformed metrics diagnoses remain fault-contained.** `/metrics` returns the established static `500 metrics unavailable` response without reflecting validation details or rereading legacy state.
+- **Legacy compatibility remains.** Runtimes that do not expose diagnosis methods continue through the historical readiness/metrics fallback unchanged.
+- **Prometheus and HTTP contracts remain unchanged for valid diagnoses.** Metric names, normalization, HELP/TYPE metadata, `Server: nvlx`, no-store caching and byte-accurate framing are preserved.
+- **Checkpoint semantics are unchanged.** Receipt proof, canonical digest validation, ambiguity recovery, reconciliation accounting, rollback fencing, replay floors and Lease-epoch behavior are untouched.
+- **No RBAC expansion.** This release changes typed validation, HTTP diagnosis adaptation, tests, package metadata and documentation only.
 
-## Runtime diagnosis contract
+## Validation boundary
 
-The v1.6.6 live runtime exposes two immutable objects:
+The v1.6.6.1 runtime-owned path now treats the diagnosis API as an explicit schema rather than a duck-typed convenience interface:
 
-1. `ReadinessDiagnosis` — one authoritative readiness decision and the resulting diagnostic gate state;
-2. `MetricsDiagnosis` — that readiness diagnosis plus the complete set of exported reconcile/checkpoint source values for one scrape.
+1. built-in diagnosis dataclasses validate their field types when constructed;
+2. the HTTP adapter independently validates diagnosis-shaped objects returned by custom runtimes;
+3. a runtime that implements a diagnosis method but returns an invalid object is treated as a broken diagnosis provider, not silently downgraded to the legacy path;
+4. readiness therefore fails closed and metrics use the existing bounded exporter failure response.
 
-The HTTP server consumes those objects without consulting the live runtime again. Older runtimes continue through the historical compatibility path.
+The historical fallback remains available only to runtimes that do not advertise the diagnosis methods.
 
 ## Safety invariants
 
-1. The established runtime `ready()` chain remains the authoritative serving decision.
-2. One runtime-owned readiness diagnosis invokes authoritative readiness once.
-3. Checkpoint readiness diagnostics do not re-run `_checkpoint_ready()` after the authoritative decision.
-4. The v1.6.6 live HTTP path does not require direct access to private Lease/checkpoint fields or live stats after receiving a diagnosis object.
-5. Metrics rendering remains isolated from live source rereads.
-6. Legacy/custom runtimes without diagnosis methods remain supported through the established fallback.
-7. Prometheus metric names, values, HELP/TYPE metadata, ordering and normalization remain unchanged.
-8. v1.6.5.9 frozen metrics capture and v1.6.5.8 framework-error containment remain unchanged.
+1. Typed readiness fields must be exact Python `bool` values.
+2. Typed exported metric fields must be exact Python `int` values; `bool` is not accepted as an integer metric value.
+3. Truthy strings such as `"false"` cannot authorize readiness.
+4. Malformed typed readiness diagnoses do not trigger legacy runtime fallback.
+5. Malformed typed metrics diagnoses do not trigger live-state rereads and remain inside the static `500 metrics unavailable` boundary.
+6. Valid v1.6.6 runtime-owned diagnosis objects preserve the same `/readyz` and `/metrics` output as before.
+7. Legacy/custom runtimes without diagnosis methods remain supported through the established fallback.
+8. v1.6.6 single authoritative readiness evaluation and no-double-checkpoint evaluation remain unchanged.
 9. All v1.6.5.x checkpoint receipt, reconciliation and persistence semantics remain unchanged.
 10. No new Kubernetes mutation path or RBAC permission is introduced.
-11. NVIDIA driver/GPU Operator resources remain read-only in v1.6.6.
+11. NVIDIA driver/GPU Operator resources remain read-only in v1.6.6.1.
