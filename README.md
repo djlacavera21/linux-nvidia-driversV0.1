@@ -1,42 +1,42 @@
-# nvlx: Linux-NVIDIA-Driver v1.6.5.3
+# nvlx: Linux-NVIDIA-Driver v1.6.5.4
 
-`nvlx` v1.6.5.3 closes Prometheus exporter schema drift by replacing separately maintained HELP and TYPE metadata with one immutable metric schema and a fail-fast sample completeness check.
+`nvlx` v1.6.5.4 hardens the live HTTP health and telemetry surface so liveness, readiness and Prometheus responses cannot be reused from an intermediary cache while preserving all established status, body and readiness semantics.
 
 > [!IMPORTANT]
 > NVIDIA driver/GPU Operator resources remain read-only. The operator still mutates only nvlx-owned GPUFleet status/finalizers plus its existing Lease and Events.
 
-## v1.6.5.3 Prometheus schema-closure hardening
+## v1.6.5.4 live-state HTTP cache hardening
 
-- **One immutable schema now owns metric metadata.** Every exported series is defined by a single `MetricSpec` containing its Prometheus type and static HELP description.
-- **HELP and TYPE cannot drift independently.** The historical counter set and HELP mapping remain available as derived compatibility views rather than separate sources of truth.
-- **Rendered samples must exactly match the schema.** Missing, extra or reordered metric samples now fail closed before exposition rather than emitting a partially valid or silently inconsistent scrape.
-- **Output order is schema-owned and deterministic.** The same established metric ordering is preserved, including the v1.6.5.2 reconciliation counter.
-- **Metric metadata is validated at definition time.** Unsupported Prometheus types, empty HELP text and multiline HELP text are rejected.
-- **Existing names, values and normalization behavior are unchanged.** All previous PromQL series names and integer normalization semantics remain compatible.
-- **Checkpoint telemetry remains unchanged.** `nvlx_nvidia_checkpoint_reconciled_commits_total` remains a counter and retains its v1.6.5.2 acceptance semantics.
-- **No runtime persistence change.** Per-call commit receipts, ambiguity classification, canonical digest verification, rollback fencing and Lease-epoch handling are unchanged.
-- **No readiness or HTTP contract change.** Closed readiness snapshots and Prometheus UTF-8 text exposition remain intact.
-- **No RBAC expansion.** This release changes exporter schema validation, tests, package metadata and documentation only.
+- **Live state is explicitly non-cacheable.** `/livez`, `/readyz` and `/metrics` now return `Cache-Control: no-store` on their normal response paths.
+- **Both readiness outcomes are covered.** Ready `200` and not-ready `503` responses carry the same no-store contract so stale readiness cannot be replayed by an intermediary.
+- **Health content types are explicit.** `/livez` and `/readyz` now return `text/plain; charset=utf-8` and encode their bodies as UTF-8.
+- **Prometheus content type is preserved.** `/metrics` remains `text/plain; version=0.0.4; charset=utf-8` while also becoming non-cacheable.
+- **Bodies and status codes are unchanged.** `/livez` remains `200` with `ok`, `/readyz` remains `200 ready` or `503 not ready`, and `/metrics` remains `200` with the established exposition body.
+- **Unknown-path behavior is unchanged.** Existing `404` behavior remains outside the live-state response helper.
+- **Readiness evaluation is unchanged.** Atomic post-evaluation readiness snapshots, Lease freshness diagnostics and checkpoint readiness semantics are untouched.
+- **Prometheus schema closure is unchanged.** The immutable `MetricSpec` registry and fail-fast sample completeness checks from v1.6.5.3 remain intact.
+- **Checkpoint recovery telemetry is unchanged.** Reconciled commit accounting and all v1.6.5.x receipt/reconciliation rules retain their previous meanings.
+- **No RBAC expansion.** This release changes HTTP response metadata, tests, package metadata and documentation only.
 
-## Schema contract
+## HTTP contract
 
-For every emitted sample, the exporter now requires exactly one immutable schema entry with:
+The live-state endpoints now expose these cache/content-type guarantees:
 
-1. a valid `counter` or `gauge` type;
-2. one non-empty single-line HELP description;
-3. a unique position in the deterministic exposition order.
+1. `/livez`: `200`, `text/plain; charset=utf-8`, `Cache-Control: no-store`;
+2. `/readyz`: `200` or `503`, `text/plain; charset=utf-8`, `Cache-Control: no-store`;
+3. `/metrics`: `200`, `text/plain; version=0.0.4; charset=utf-8`, `Cache-Control: no-store`.
 
-Before rendering, the sample-name sequence must exactly equal the schema-name sequence. Any missing sample, unregistered sample or ordering drift raises an internal error instead of producing ambiguous Prometheus metadata.
+No response-body or readiness-policy change is required for existing Kubernetes probes or Prometheus scrapers.
 
 ## Safety invariants
 
-1. Every exported metric remains represented exactly once in the schema.
-2. HELP and TYPE metadata are generated exclusively from the same `MetricSpec` entry.
-3. Missing, extra and reordered samples fail closed before exposition.
-4. Existing metric names, numeric values, normalization and exposition order remain unchanged from v1.6.5.2.
-5. `nvlx_nvidia_checkpoint_reconciled_commits_total` remains a Prometheus counter with unchanged meaning.
-6. v1.6.5.2 reconciliation accounting remains unchanged.
+1. Live liveness, readiness and metrics responses are explicitly non-cacheable.
+2. Ready and not-ready responses use the same cache-prevention policy.
+3. Health bodies are explicitly UTF-8 text without changing their existing bytes or status codes.
+4. Prometheus exposition version, charset, metric names, values, HELP/TYPE metadata and ordering are unchanged.
+5. v1.6.5.3 metric-schema closure remains unchanged.
+6. v1.6.5.2 reconciliation telemetry remains unchanged.
 7. v1.6.5.1 transport-ambiguity classification remains unchanged.
 8. v1.6.5 per-call checkpoint receipt proof remains unchanged.
 9. No new Kubernetes mutation path or RBAC permission is introduced.
-10. NVIDIA driver/GPU Operator resources remain read-only in v1.6.5.3.
+10. NVIDIA driver/GPU Operator resources remain read-only in v1.6.5.4.

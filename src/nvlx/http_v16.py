@@ -124,20 +124,31 @@ class HealthServer:
         outer = self
 
         class Handler(BaseHTTPRequestHandler):
+            def _send_text(
+                self,
+                status: int,
+                body: str,
+                *,
+                content_type: str = "text/plain; charset=utf-8",
+            ) -> None:
+                payload = body.encode("utf-8")
+                self.send_response(status)
+                self.send_header("Content-Type", content_type)
+                self.send_header("Cache-Control", "no-store")
+                self.end_headers()
+                self.wfile.write(payload)
+
             def do_GET(self):
                 runtime = outer.runtime
                 s = runtime.stats
                 if self.path == "/livez":
-                    self.send_response(200)
-                    self.end_headers()
-                    self.wfile.write(b"ok\n")
+                    self._send_text(200, "ok\n")
                     return
                 if self.path == "/readyz":
                     snapshot = _readiness_snapshot(runtime, s)
-                    self.send_response(200 if snapshot.controller_ready else 503)
-                    self.end_headers()
-                    self.wfile.write(
-                        ("ready\n" if snapshot.controller_ready else "not ready\n").encode()
+                    self._send_text(
+                        200 if snapshot.controller_ready else 503,
+                        "ready\n" if snapshot.controller_ready else "not ready\n",
                     )
                     return
                 if self.path == "/metrics":
@@ -174,12 +185,11 @@ class HealthServer:
                         checkpoint_epoch=getattr(runtime, "nvidia_checkpoint_epoch", 0),
                         checkpoint_ready=snapshot.checkpoint_ready,
                     )
-                    self.send_response(200)
-                    self.send_header(
-                        "Content-Type", "text/plain; version=0.0.4; charset=utf-8"
+                    self._send_text(
+                        200,
+                        body,
+                        content_type="text/plain; version=0.0.4; charset=utf-8",
                     )
-                    self.end_headers()
-                    self.wfile.write(body.encode("utf-8"))
                     return
                 self.send_response(404)
                 self.end_headers()
