@@ -63,6 +63,17 @@ class Runtime:
             if name is not None and name != expected_name: return None
         return meta
 
+    @staticmethod
+    def _object_identity_valid(obj: object) -> bool:
+        if not isinstance(obj,dict): return False
+        meta=obj.get("metadata")
+        if not isinstance(meta,dict): return False
+        name=meta.get("name"); rv=meta.get("resourceVersion")
+        if not isinstance(name,str) or not name or not isinstance(rv,str) or not rv: return False
+        generation=meta.get("generation",0)
+        try: return int(generation or 0) >= 0
+        except (TypeError,ValueError): return False
+
     @classmethod
     def _status_response_verified(cls, response: ApiResponse | None, expected_meta: dict, expected_status: dict) -> bool:
         expected_name=expected_meta.get("name","")
@@ -92,6 +103,16 @@ class Runtime:
         if PROTECTIVE_FINALIZER in finalizers: return False
         return finalizers == expected_finalizers
 
+    @classmethod
+    def _event_response_verified(cls, response: ApiResponse | None, expected_name: str, expected_uid: str, expected_identity: str) -> bool:
+        if cls._response_meta(response) is None or not isinstance(response.body,dict): return False
+        regarding=response.body.get("regarding")
+        if not isinstance(regarding,dict): return False
+        if regarding.get("name") != expected_name or regarding.get("uid") != expected_uid: return False
+        if response.body.get("reportingController") != "nvlx.io/operator": return False
+        if response.body.get("reportingInstance") != expected_identity: return False
+        return True
+
     @staticmethod
     def _conflict_refetch_matches(fresh: object, original_meta: dict) -> tuple[bool,str]:
         if not isinstance(fresh,dict): return False,""
@@ -100,10 +121,7 @@ class Runtime:
         expected_name=original_meta.get("name")
         expected_uid=original_meta.get("uid")
         expected_generation=original_meta.get("generation",0)
-        name=meta.get("name")
-        uid=meta.get("uid")
-        rv=meta.get("resourceVersion")
-        generation=meta.get("generation",0)
+        name=meta.get("name"); uid=meta.get("uid"); rv=meta.get("resourceVersion"); generation=meta.get("generation",0)
         if name != expected_name: return False,""
         if expected_uid and uid != expected_uid: return False,""
         try:
@@ -119,7 +137,7 @@ class Runtime:
         event={"apiVersion":"events.k8s.io/v1","kind":"Event","metadata":{"generateName":f"nvlx-{name}-","namespace":self.namespace},"eventTime":now,"reportingController":"nvlx.io/operator","reportingInstance":self.identity,"action":"Reconcile","reason":reason,"note":note[:1024],"type":"Normal","regarding":{"apiVersion":"nvlx.io/v1alpha1","kind":"GPUFleet","name":name,"uid":uid}}
         try:
             response=self.client.create_event(self.namespace,event)
-            return self._response_meta(response) is not None
+            return self._event_response_verified(response,name,uid,self.identity)
         except ApiError: return False
 
     def _patch_status(self, obj: dict, status: dict) -> bool:
@@ -156,14 +174,9 @@ class Runtime:
 
     def reconcile_object(self, obj: dict, *, event_type: str="MODIFIED") -> str:
         self.stats.reconcile_total += 1
-        if not isinstance(obj,dict): self.stats.reconcile_failures += 1; return "invalid"
-        meta=obj.get("metadata")
-        if not isinstance(meta,dict): self.stats.reconcile_failures += 1; return "invalid"
-        name=meta.get("name",""); rv=meta.get("resourceVersion","")
-        if not isinstance(name,str) or not name or not isinstance(rv,str) or not rv: self.stats.reconcile_failures += 1; return "invalid"
-        try: generation=int(meta.get("generation",0) or 0)
-        except (TypeError,ValueError): self.stats.reconcile_failures += 1; return "invalid"
-        if generation < 0: self.stats.reconcile_failures += 1; return "invalid"
+        if not self._object_identity_valid(obj): self.stats.reconcile_failures += 1; return "invalid"
+        meta=obj["metadata"]; name=meta["name"]; rv=meta["resourceVersion"]
+        generation=int(meta.get("generation",0) or 0)
         self.stats.last_resource_version=rv
         if meta.get("deletionTimestamp"):
             return "finalized" if self._finalize(obj) else "finalizer-hold"
@@ -189,6 +202,9 @@ class Runtime:
         if not isinstance(rv,str) or not rv: raise RuntimeError("GPUFleet list did not return resourceVersion")
         items=body.get("items",[])
         if not isinstance(items,list): raise RuntimeError("GPUFleet list items must be a list")
+        if not all(self._object_identity_valid(item) for item in items):
+            self.stats.inventory_fresh=False
+            raise RuntimeError("GPUFleet list contains invalid object identity")
         for item in items:
             if self._stop.is_set(): return "stopped"
             self.reconcile_object(item,event_type="ADDED")
@@ -206,6 +222,9 @@ class Runtime:
                         if isinstance(bookmark_meta,dict):
                             bookmark_rv=bookmark_meta.get("resourceVersion")
                             if isinstance(bookmark_rv,str) and bookmark_rv: self.stats.last_resource_version=bookmark_rv
+                    continue
+                if not self._object_identity_valid(obj):
+                    self.stats.reconcile_failures += 1
                     continue
                 self.reconcile_object(obj,event_type=decision.action.upper())
             return "eof"
