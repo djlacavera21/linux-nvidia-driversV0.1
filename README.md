@@ -1,28 +1,28 @@
-# nvlx: Linux-NVIDIA-Driver v1.6.6.6.6.6.6.1
+# nvlx: Linux-NVIDIA-Driver v1.6.6.6.6.6.6.2
 
-`nvlx` v1.6.6.6.6.6.6.1 adds a strict request-header field-count budget to the live HTTP server. Previous releases already bound concurrency, request idle time, total header-parse time, request-line bytes, and aggregate header bytes; this release closes the remaining tiny-header cardinality gap by limiting each admitted request to 32 header fields by default.
+`nvlx` v1.6.6.6.6.6.6.2 adds bodyless request-framing containment to the live HTTP server. The health, readiness, and metrics surface does not consume request bodies, so this release rejects `Transfer-Encoding`, non-zero or malformed `Content-Length`, and duplicate `Content-Length` fields before endpoint or runtime evaluation. A single `Content-Length: 0` remains accepted for client compatibility.
 
 > [!IMPORTANT]
 > NVIDIA driver/GPU Operator resources remain read-only. The operator still mutates only nvlx-owned GPUFleet status/finalizers plus its existing Lease and Events.
 
-## v1.6.6.6.6.6.6.1 request-header field budget
+## v1.6.6.6.6.6.6.2 bodyless request-framing containment
 
-- **Request headers are capped at 32 fields by default.** This is tighter than BaseHTTP's historical 100-header ceiling.
-- **Excess fields use the existing contained parser contract.** Requests above the configured field cap return canonical `431 Request Rejected` framing and close the connection.
-- **HEAD overflow remains bodyless.** Header cardinality is enforced after the request method is parsed, so the existing HEAD body-suppression rule is preserved.
-- **Runtime/endpoint evaluation is isolated.** Excess header fields never reach `/livez`, `/readyz`, `/metrics`, readiness diagnosis, or metrics diagnosis.
-- **Admission capacity recovers normally.** A field-count `431` releases its bounded worker slot like other terminal parser outcomes.
-- **Header field and byte budgets are independent.** A small number of larger headers may use the existing 32 KiB byte allowance, while many tiny headers cannot bypass the 32-field cap.
-- **Continuation lines do not consume additional field slots.** Their bytes remain governed by the aggregate header-byte budget.
-- **Configuration is strict.** `max_request_header_fields` must be an exact positive integer no greater than 100.
-- **Existing ingress defenses remain intact.** The 8 KiB request-line budget, 32 KiB aggregate header budget, 5-second idle timeout, 5-second absolute header deadline, and 32-request admission cap are unchanged.
+- **Live requests remain bodyless by contract.** `/livez`, `/readyz`, and `/metrics` never consume request payload bytes.
+- **`Transfer-Encoding` is rejected.** Any transfer-coding field, including `chunked` or `identity`, terminates the request through the canonical contained `400 Request Rejected` path.
+- **Only one zero content length is admitted.** A single `Content-Length: 0` is accepted, with ordinary optional surrounding space or tab; non-zero, malformed, signed, comma-joined, leading-zero, folded, or duplicate values are rejected.
+- **Framing rejection is terminal.** Rejected connections are closed so bytes after the header block cannot be reinterpreted as a pipelined request.
+- **HEAD rejection remains bodyless.** Framing is checked after the request method is parsed, preserving the established HEAD body-suppression rule and representation `Content-Length`.
+- **Runtime/endpoint evaluation is isolated.** Rejected framing never reaches `/livez`, `/readyz`, `/metrics`, readiness diagnosis, or metrics diagnosis.
+- **Admission capacity recovers normally.** A framing `400` releases its bounded worker slot like other terminal parser outcomes.
+- **The existing method contract is preserved.** A bodyless unsupported method still receives `405 Method Not Allowed` with `Allow: GET, HEAD`; malformed body framing is rejected first as `400`.
+- **Existing ingress defenses remain intact.** The 8 KiB request-line budget, 32 KiB aggregate header budget, 32-field header cap, 5-second idle timeout, 5-second absolute header deadline, and 32-request admission cap are unchanged.
 - **Completed response behavior is unchanged.** GET/HEAD parity, parser `400/414/431/505`, resource `404`, method `405`, metrics `500`, canonical framing, non-reflective logging, and client-abort containment remain unchanged.
-- **The live operator now uses `http_v16666661`.** The live runtime remains `runtime_v1664`.
+- **The live operator now uses `http_v16666662`.** The live runtime remains `runtime_v1664`.
 - **Checkpoint persistence, Prometheus schema, RBAC, readiness policy, and NVIDIA mutation behavior are unchanged.**
 
 ## Ingress resource model
 
-The live server now applies six independent ingress bounds:
+The live server retains six independent quantitative ingress bounds:
 
 1. `max_concurrent_requests` — admitted request workers, default 32.
 2. `request_timeout_seconds` — idle timeout between socket reads, default 5 seconds.
@@ -31,18 +31,19 @@ The live server now applies six independent ingress bounds:
 5. `max_request_header_bytes` — aggregate request-header byte budget, default 32768 bytes.
 6. `max_request_header_fields` — request-header field-count budget, default 32 fields.
 
-The request-line, header-byte, and header-field budgets are intentionally independent. A normal short request line does not reduce header capacity, and a header set must satisfy both the byte and field-count limits.
+The request-line, header-byte, and header-field budgets remain independent. The new framing rule is a protocol invariant rather than another resource budget: admitted requests must be bodyless, represented by no body-framing headers or exactly one zero `Content-Length`.
 
 ## Safety invariants
 
-1. Excess request-header fields are rejected before endpoint/runtime evaluation.
-2. Field-count overflow uses the existing canonical terminal `431` path.
-3. HEAD field-count overflow remains bodyless while preserving representation `Content-Length`.
-4. Field-count rejection releases bounded worker capacity.
-5. Header field-count and aggregate byte budgets remain independent.
-6. Silent and byte-trickle partial requests remain bounded by the inherited idle timeout and absolute parse deadline.
-7. Oversized request lines remain bounded by the inherited 8 KiB request-line budget.
-8. Saturated connections never reach endpoint/runtime logic.
-9. Existing client-abort, parser-error, logging, and body-framing containment remains unchanged.
-10. All v1.6.5.x checkpoint receipt, reconciliation, and persistence semantics remain unchanged.
-11. NVIDIA driver/GPU Operator resources remain read-only in v1.6.6.6.6.6.6.1.
+1. Transfer-coded, non-zero-length, malformed-length, and duplicate-length requests are rejected before endpoint/runtime evaluation.
+2. Body-framing rejection uses the existing canonical terminal `400 Request Rejected` path with `Connection: close`.
+3. Bytes following rejected framing cannot become a second pipelined request on the same connection.
+4. HEAD framing rejection remains bodyless while preserving representation `Content-Length`.
+5. A single zero `Content-Length` remains compatible with normal GET/HEAD handling.
+6. Framing rejection releases bounded worker capacity.
+7. Header field-count, aggregate header bytes, and request-line byte budgets remain independently enforced.
+8. Silent and byte-trickle partial requests remain bounded by the inherited idle timeout and absolute parse deadline.
+9. Saturated connections never reach endpoint/runtime logic.
+10. Existing client-abort, parser-error, logging, response-body, and method containment remains unchanged.
+11. All v1.6.5.x checkpoint receipt, reconciliation, and persistence semantics remain unchanged.
+12. NVIDIA driver/GPU Operator resources remain read-only in v1.6.6.6.6.6.6.2.
