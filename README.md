@@ -1,38 +1,42 @@
-# nvlx: Linux-NVIDIA-Driver v1.6.5.2
+# nvlx: Linux-NVIDIA-Driver v1.6.5.3
 
-`nvlx` v1.6.5.2 adds first-class telemetry for checkpoint commits that were successfully recovered after a transport-ambiguous write or readback outcome.
+`nvlx` v1.6.5.3 closes Prometheus exporter schema drift by replacing separately maintained HELP and TYPE metadata with one immutable metric schema and a fail-fast sample completeness check.
 
 > [!IMPORTANT]
 > NVIDIA driver/GPU Operator resources remain read-only. The operator still mutates only nvlx-owned GPUFleet status/finalizers plus its existing Lease and Events.
 
-## v1.6.5.2 reconciliation telemetry
+## v1.6.5.3 Prometheus schema-closure hardening
 
-- **Recovered ambiguous commits are now observable.** The runtime tracks `nvidia_checkpoint_reconciled_commits` whenever an accepted `CheckpointCommitReceipt` is marked `reconciled=True`.
-- **Prometheus exports a dedicated counter.** `nvlx_nvidia_checkpoint_reconciled_commits_total` reports successful checkpoint commits recovered after transport-ambiguous outcomes.
-- **Advancing recovered writes remain normal writes.** If an ambiguous PATCH actually committed a new sequence, the operation increments both `nvlx_nvidia_checkpoint_writes_total` and `nvlx_nvidia_checkpoint_reconciled_commits_total`.
-- **Non-advancing reconciled acknowledgements remain idempotent acknowledgements.** An accepted equal-sequence reconciled receipt increments both the existing idempotent-ack counter and the new reconciliation counter.
-- **Rejected operations cannot inflate recovery telemetry.** Digest mismatches, rollback sequences, invalid receipts and other fail-closed outcomes do not increment the reconciliation counter.
-- **Older runtimes remain scrape-compatible.** The HTTP metrics layer uses a zero fallback when the runtime does not expose the new counter.
-- **Prometheus metadata remains standards-clean.** The new series has stable HELP metadata and `counter` TYPE metadata while existing HELP/TYPE/sample ordering and UTF-8 content type remain unchanged.
-- **The live operator now uses the v1.6.5.2 runtime.** The v1.6.5.1 ambiguity-classifying checkpoint store remains the persistence implementation.
-- **No checkpoint protocol change.** The v3 checkpoint envelope, sequence floor, per-call receipt digest, readback verification, rollback fencing and Lease-epoch rules are unchanged.
-- **No RBAC expansion.** The release adds process-local accounting and telemetry only.
+- **One immutable schema now owns metric metadata.** Every exported series is defined by a single `MetricSpec` containing its Prometheus type and static HELP description.
+- **HELP and TYPE cannot drift independently.** The historical counter set and HELP mapping remain available as derived compatibility views rather than separate sources of truth.
+- **Rendered samples must exactly match the schema.** Missing, extra or reordered metric samples now fail closed before exposition rather than emitting a partially valid or silently inconsistent scrape.
+- **Output order is schema-owned and deterministic.** The same established metric ordering is preserved, including the v1.6.5.2 reconciliation counter.
+- **Metric metadata is validated at definition time.** Unsupported Prometheus types, empty HELP text and multiline HELP text are rejected.
+- **Existing names, values and normalization behavior are unchanged.** All previous PromQL series names and integer normalization semantics remain compatible.
+- **Checkpoint telemetry remains unchanged.** `nvlx_nvidia_checkpoint_reconciled_commits_total` remains a counter and retains its v1.6.5.2 acceptance semantics.
+- **No runtime persistence change.** Per-call commit receipts, ambiguity classification, canonical digest verification, rollback fencing and Lease-epoch handling are unchanged.
+- **No readiness or HTTP contract change.** Closed readiness snapshots and Prometheus UTF-8 text exposition remain intact.
+- **No RBAC expansion.** This release changes exporter schema validation, tests, package metadata and documentation only.
 
-## New metric
+## Schema contract
 
-`nvlx_nvidia_checkpoint_reconciled_commits_total`
+For every emitted sample, the exporter now requires exactly one immutable schema entry with:
 
-This counter increases only after a reconciled receipt has passed the existing runtime acceptance checks. It is intentionally separate from `nvlx_nvidia_checkpoint_writes_total` and `nvlx_nvidia_checkpoint_idempotent_acks_total` so operators can distinguish normal persistence from transport-ambiguity recovery.
+1. a valid `counter` or `gauge` type;
+2. one non-empty single-line HELP description;
+3. a unique position in the deterministic exposition order.
+
+Before rendering, the sample-name sequence must exactly equal the schema-name sequence. Any missing sample, unregistered sample or ordering drift raises an internal error instead of producing ambiguous Prometheus metadata.
 
 ## Safety invariants
 
-1. The reconciliation counter increments only for accepted receipts with `reconciled=True`.
-2. Digest mismatches and rollback failures cannot increment reconciliation telemetry.
-3. Advancing reconciled commits continue to count as successful checkpoint writes.
-4. Equal-sequence reconciled commits still require `idempotent=True`, the same Lease epoch and exact per-call digest proof.
-5. The v1.6.5.1 transport-versus-deterministic reconciliation eligibility rules are unchanged.
-6. Checkpoint encoding, sequence-floor retention, readback verification and Lease transition semantics are unchanged.
-7. Existing metric names and values retain their previous meanings.
-8. Readiness, leadership snapshot closure and Prometheus exposition ordering are unchanged.
+1. Every exported metric remains represented exactly once in the schema.
+2. HELP and TYPE metadata are generated exclusively from the same `MetricSpec` entry.
+3. Missing, extra and reordered samples fail closed before exposition.
+4. Existing metric names, numeric values, normalization and exposition order remain unchanged from v1.6.5.2.
+5. `nvlx_nvidia_checkpoint_reconciled_commits_total` remains a Prometheus counter with unchanged meaning.
+6. v1.6.5.2 reconciliation accounting remains unchanged.
+7. v1.6.5.1 transport-ambiguity classification remains unchanged.
+8. v1.6.5 per-call checkpoint receipt proof remains unchanged.
 9. No new Kubernetes mutation path or RBAC permission is introduced.
-10. NVIDIA driver/GPU Operator resources remain read-only in v1.6.5.2.
+10. NVIDIA driver/GPU Operator resources remain read-only in v1.6.5.3.
