@@ -1,28 +1,29 @@
-# nvlx: Linux-NVIDIA-Driver v1.6.1.7
+# nvlx: Linux-NVIDIA-Driver v1.6.1.8
 
-`nvlx` v1.6.1.7 is a narrow runtime-integrity hotfix on top of v1.6.1.6. It keeps the same controller API surface and NVIDIA read-only boundary while tightening relist deduplication and DELETED-watch handling without treating Kubernetes `resourceVersion` as ordered.
+`nvlx` v1.6.1.8 is a narrow runtime-integrity hotfix on top of v1.6.1.7. It keeps the same controller API surface and NVIDIA read-only boundary while bounding/pruning in-memory watch state and preserving retry eligibility for list reconciliations that did not settle successfully.
 
 > [!IMPORTANT]
-> NVIDIA resource changes remain read-only in v1.6.1.7. The operator mutates only nvlx-owned GPUFleet status/finalizers plus its Lease and Events; driver/GPU Operator mutation remains deferred.
+> NVIDIA resource changes remain read-only in v1.6.1.8. The operator mutates only nvlx-owned GPUFleet status/finalizers plus its Lease and Events; driver/GPU Operator mutation remains deferred.
 
-## v1.6.1.7 hotfixes
+## v1.6.1.8 hotfixes
 
-- **Relist-seeded watch state.** After a trusted list snapshot is reconciled, each listed GPUFleet seeds the in-memory watch state. The first exact ADDED/MODIFIED delivery for the same UID, generation, and opaque resourceVersion can therefore be suppressed after relist/reconnect.
-- **Opaque resourceVersion retained.** resourceVersion tokens are matched only for exact equality; they are never numerically or lexically ordered.
-- **Deletion separation.** A DELETED watch event is never swallowed merely because its object metadata exactly matches a prior list, ADDED, or MODIFIED state.
-- **Observe-only terminal delete.** A DELETED event that does not carry `deletionTimestamp` is treated as `deleted-observed`; it cannot run status planning or a stale mutation path after the object is already gone.
-- **Generation fencing retained.** Same-UID generation regressions remain fail-closed across relists.
-- **New incarnation handling retained.** A new UID remains a new object incarnation even when generation restarts lower.
-- **Runtime counters.** RuntimeStats now records relist-seeded objects and accepted DELETED watch events in addition to duplicate/stale-generation counters.
-- **Regression coverage.** Tests cover first-watch duplicate suppression after a list, deletion separation, observe-only terminal deletion, post-list generation rollback, and UID replacement.
+- **Bounded watch cache.** The per-process watch state has a validated positive integer limit (default 4096). New object keys beyond the bound deterministically evict the oldest retained key instead of growing memory without bound.
+- **Trusted relist pruning.** A valid list snapshot prunes cached object keys that no longer exist in that snapshot, preventing deleted/replaced GPUFleet history from accumulating indefinitely.
+- **Deferred-reconcile retry preservation.** List items that return deferred outcomes such as `standby`, `fenced`, `finalizer-hold`, `hold`, or other unsettled states are not seeded into duplicate suppression. An identical first watch delivery can therefore retry work after leadership or API conditions recover.
+- **Settled-only relist seeding.** Only settled outcomes such as a verified status patch, status/event no-op, finalized object, or observe-only deletion seed relist dedupe state.
+- **Opaque resourceVersion retained.** resourceVersion remains equality-only and is never numerically or lexically ordered.
+- **Generation fencing retained.** Same-UID generation regressions remain fail-closed for retained cache entries.
+- **Lifecycle counters.** RuntimeStats records cache pruning, bounded-cache evictions, and deferred relist objects in addition to prior duplicate, stale-generation, relist-seeded, and deletion counters.
+- **Regression coverage.** Tests cover deferred list retry through an identical watch event, successful relist seeding, absent-object pruning, bounded deterministic eviction, invalid cache limits, and generation-regression fencing after cache lifecycle changes.
 
 ## Safety invariants
 
-1. A trusted list snapshot can seed deduplication state, preventing the same exact state from being reconciled again immediately after relist.
-2. A DELETED delivery remains semantically distinct from prior list/ADDED/MODIFIED deliveries.
-3. Terminal DELETED events without deletionTimestamp are observe-only and cannot trigger status mutation.
+1. Watch-state memory cannot grow without a configured hard bound.
+2. A trusted relist removes stale cache entries for objects no longer present in the snapshot.
+3. Deferred list work cannot be hidden by duplicate suppression before it has a chance to retry.
 4. Kubernetes resourceVersion remains opaque and is never ordered.
-5. Same-UID generation regression fencing remains active across relists.
-6. Every controller-owned Kubernetes mutation remains fenced by live leadership.
-7. NVIDIA resources remain read-only in v1.6.1.7.
-8. All v0.1-v1.6.1.6 approval, rollback, Secure Boot, DRA, fabric, health/SLO, PSIRT, quarantine, audit, SBOM, provenance, fencing, replay and Lease-CAS safeguards remain in force.
+5. Same-UID generation regression fencing remains active for retained state.
+6. Terminal DELETED events remain observe-only unless Kubernetes deletion flow still requires finalizer handling.
+7. Every controller-owned Kubernetes mutation remains fenced by live leadership.
+8. NVIDIA resources remain read-only in v1.6.1.8.
+9. All v0.1-v1.6.1.7 approval, rollback, Secure Boot, DRA, fabric, health/SLO, PSIRT, quarantine, audit, SBOM, provenance, fencing, replay and Lease-CAS safeguards remain in force.
