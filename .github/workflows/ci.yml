@@ -29,31 +29,37 @@ jobs:
         run: python -m unittest discover -s tests -v
       - name: Reproducible archive smoke test
         run: |
-          python scripts/repro_release.py 1.6.2.9 --out /tmp/repro-a
-          python scripts/repro_release.py 1.6.2.9 --out /tmp/repro-b
+          python scripts/repro_release.py 1.6.3 --out /tmp/repro-a
+          python scripts/repro_release.py 1.6.3 --out /tmp/repro-b
           cmp /tmp/repro-a/SHA256SUMS /tmp/repro-b/SHA256SUMS
       - name: CLI smoke test
         run: |
-          nvlx --version | grep 1.6.2.9
+          nvlx --version | grep 1.6.3
           nvlx-operator --help | grep 'live GPUFleet Kubernetes operator'
           nvlx-operator --help | grep -- '--token-file'
           nvlx-operator --help | grep -- '--watch-timeout-seconds'
           python - <<'PY'
-          from nvlx.k8s_api_v16 import ApiResponse
-          from nvlx.runtime_v1629 import Runtime
+          from nvlx.k8s_api_v16 import ApiResponse, ApiError
+          from nvlx.nvidia_inventory_v163 import NvidiaInventory
 
-          obj={'metadata':{'name':'prod','uid':'u1','generation':4,'resourceVersion':'11','annotations':{}},'status':{}}
           class C:
-              def __init__(self): self.watch_calls=0
-              def list_fleets(self): return ApiResponse(200,{'metadata':{'resourceVersion':'list-rv'},'items':[obj]},{})
-              def watch_path(self,rv): return '/watch'
-              def watch_lines(self,path):
-                  self.watch_calls += 1
-                  yield {'type':'BOOKMARK','object':{'metadata':{'resourceVersion':'12'}}}
-          c=C(); r=Runtime(c,'pod-a',leader_check=lambda:False)
-          assert r.list_and_watch_once() == 'relist'
-          assert c.watch_calls == 0
-          assert not r.stats.inventory_fresh
-          assert r.stats.last_resource_version == ''
-          assert 'u1' not in r._watch_seen
+              def __init__(self, conflict=False): self.conflict=conflict
+              def request_json(self, method, path, body=None, **kwargs):
+                  values={
+                      '/apis/nvidia.com':{'preferredVersion':{'groupVersion':'nvidia.com/v1'},'versions':[{'groupVersion':'nvidia.com/v1'},{'groupVersion':'nvidia.com/v1alpha1'}]},
+                      '/apis/nvidia.com/v1':{'resources':[{'name':'clusterpolicies'}]},
+                      '/apis/nvidia.com/v1alpha1':{'resources':[{'name':'gpuclusters'},{'name':'nvidiadrivers'}]},
+                      '/apis/nvidia.com/v1/clusterpolicies':{'items':[{'metadata':{'name':'cluster-policy'},'status':{'state':'ready'}}] if self.conflict else []},
+                      '/apis/nvidia.com/v1alpha1/gpuclusters':{'items':[{'metadata':{'name':'gpu-cluster'},'status':{'state':'ready'}}]},
+                      '/apis/nvidia.com/v1alpha1/nvidiadrivers':{'items':[{'metadata':{'name':'default'},'spec':{'default':True},'status':{'state':'ready'}}]},
+                      '/api/v1/nodes':{'items':[{'metadata':{'name':'gpu-1','labels':{'nvidia.com/gpu.present':'true'}}}]},
+                  }
+                  if path == '/apis/resource.nvidia.com': raise ApiError(404,'not found')
+                  if path not in values: raise ApiError(404,'not found')
+                  return ApiResponse(200,values[path])
+          ok=NvidiaInventory(C()).check()
+          assert ok.ready and ok.mode == 'dra'
+          blocked=NvidiaInventory(C(conflict=True)).check()
+          assert not blocked.ready
+          assert 'GPUCluster and ClusterPolicy cannot coexist' in blocked.reasons
           PY

@@ -2,7 +2,7 @@
 from __future__ import annotations
 import json
 
-def manifests(*, namespace: str="nvlx-system", image: str="ghcr.io/nvlx/controller:1.6.0", replicas: int=2) -> list[dict]:
+def manifests(*, namespace: str="nvlx-system", image: str="ghcr.io/nvlx/controller:1.6.3", replicas: int=2) -> list[dict]:
     if replicas < 2: raise ValueError("production HA requires at least two replicas")
     labels={"app":"nvlx-controller"}
     sa={"apiVersion":"v1","kind":"ServiceAccount","metadata":{"name":"nvlx-controller","namespace":namespace}}
@@ -12,6 +12,8 @@ def manifests(*, namespace: str="nvlx-system", image: str="ghcr.io/nvlx/controll
         {"apiGroups":["coordination.k8s.io"],"resources":["leases"],"verbs":["get","create","update","patch"]},
         {"apiGroups":["events.k8s.io"],"resources":["events"],"verbs":["create","patch"]},
         {"apiGroups":["nvidia.com"],"resources":["*"],"verbs":["get","list","watch"]},
+        {"apiGroups":["resource.nvidia.com"],"resources":["*"],"verbs":["get","list","watch"]},
+        {"apiGroups":[""],"resources":["nodes"],"verbs":["get","list","watch"]},
     ]}
     crb={"apiVersion":"rbac.authorization.k8s.io/v1","kind":"ClusterRoleBinding","metadata":{"name":"nvlx-controller"},"subjects":[{"kind":"ServiceAccount","name":"nvlx-controller","namespace":namespace}],"roleRef":{"apiGroup":"rbac.authorization.k8s.io","kind":"ClusterRole","name":"nvlx-controller"}}
     dep={"apiVersion":"apps/v1","kind":"Deployment","metadata":{"name":"nvlx-controller","namespace":namespace},"spec":{"replicas":replicas,"selector":{"matchLabels":labels},"template":{"metadata":{"labels":labels},"spec":{"serviceAccountName":"nvlx-controller","securityContext":{"seccompProfile":{"type":"RuntimeDefault"}},"containers":[{"name":"controller","image":image,"args":["--namespace",namespace],"ports":[{"name":"health","containerPort":8080}],"readinessProbe":{"httpGet":{"path":"/readyz","port":"health"},"initialDelaySeconds":3,"periodSeconds":5},"livenessProbe":{"httpGet":{"path":"/livez","port":"health"},"initialDelaySeconds":3,"periodSeconds":10},"securityContext":{"allowPrivilegeEscalation":False,"readOnlyRootFilesystem":True,"runAsNonRoot":True,"capabilities":{"drop":["ALL"]}}}]}}}}
