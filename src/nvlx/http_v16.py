@@ -151,6 +151,13 @@ def _strict_int_field(diagnosis, name: str) -> int:
     return value
 
 
+def _strict_nonnegative_int_field(diagnosis, name: str) -> int:
+    value = _strict_int_field(diagnosis, name)
+    if value < 0:
+        raise ValueError(f"diagnosis field {name} must be nonnegative")
+    return value
+
+
 def _coerce_readiness_diagnosis(diagnosis) -> ReadinessSnapshot:
     """Validate a runtime-owned diagnosis and normalize it to the HTTP presentation shape."""
     return ReadinessSnapshot(
@@ -215,33 +222,56 @@ def _metrics_snapshot(runtime, stats) -> MetricsSnapshot:
     )
 
 
+def _validate_typed_metrics_domain(snapshot: MetricsSnapshot) -> None:
+    if snapshot.reconcile_failures > snapshot.reconcile_total:
+        raise ValueError("reconcile failures cannot exceed reconcile attempts")
+    if snapshot.checkpoint_restore_successes > snapshot.checkpoint_restore_attempts:
+        raise ValueError("checkpoint restore successes cannot exceed restore attempts")
+    if snapshot.checkpoint_reconciled_commits > (
+        snapshot.checkpoint_writes + snapshot.checkpoint_idempotent_acks
+    ):
+        raise ValueError("reconciled commits cannot exceed accepted checkpoint commits")
+
+
 def _coerce_metrics_diagnosis(diagnosis) -> MetricsSnapshot:
     """Strictly validate runtime-owned metrics diagnosis without live-state fallback."""
-    return MetricsSnapshot(
+    snapshot = MetricsSnapshot(
         readiness=_coerce_readiness_diagnosis(diagnosis.readiness),
-        reconcile_total=_strict_int_field(diagnosis, "reconcile_total"),
-        reconcile_failures=_strict_int_field(diagnosis, "reconcile_failures"),
-        checkpoint_writes=_strict_int_field(diagnosis, "checkpoint_writes"),
-        checkpoint_idempotent_acks=_strict_int_field(
+        reconcile_total=_strict_nonnegative_int_field(diagnosis, "reconcile_total"),
+        reconcile_failures=_strict_nonnegative_int_field(
+            diagnosis, "reconcile_failures"
+        ),
+        checkpoint_writes=_strict_nonnegative_int_field(
+            diagnosis, "checkpoint_writes"
+        ),
+        checkpoint_idempotent_acks=_strict_nonnegative_int_field(
             diagnosis, "checkpoint_idempotent_acks"
         ),
-        checkpoint_reconciled_commits=_strict_int_field(
+        checkpoint_reconciled_commits=_strict_nonnegative_int_field(
             diagnosis, "checkpoint_reconciled_commits"
         ),
-        checkpoint_rollbacks=_strict_int_field(diagnosis, "checkpoint_rollbacks"),
-        checkpoint_transaction_mismatches=_strict_int_field(
+        checkpoint_rollbacks=_strict_nonnegative_int_field(
+            diagnosis, "checkpoint_rollbacks"
+        ),
+        checkpoint_transaction_mismatches=_strict_nonnegative_int_field(
             diagnosis, "checkpoint_transaction_mismatches"
         ),
-        checkpoint_failures=_strict_int_field(diagnosis, "checkpoint_failures"),
-        checkpoint_restore_attempts=_strict_int_field(
+        checkpoint_failures=_strict_nonnegative_int_field(
+            diagnosis, "checkpoint_failures"
+        ),
+        checkpoint_restore_attempts=_strict_nonnegative_int_field(
             diagnosis, "checkpoint_restore_attempts"
         ),
-        checkpoint_restore_successes=_strict_int_field(
+        checkpoint_restore_successes=_strict_nonnegative_int_field(
             diagnosis, "checkpoint_restore_successes"
         ),
-        checkpoint_sequence=_strict_int_field(diagnosis, "checkpoint_sequence"),
-        checkpoint_epoch=_strict_int_field(diagnosis, "checkpoint_epoch"),
+        checkpoint_sequence=_strict_nonnegative_int_field(
+            diagnosis, "checkpoint_sequence"
+        ),
+        checkpoint_epoch=_strict_nonnegative_int_field(diagnosis, "checkpoint_epoch"),
     )
+    _validate_typed_metrics_domain(snapshot)
+    return snapshot
 
 
 def _runtime_metrics_snapshot(runtime) -> MetricsSnapshot:

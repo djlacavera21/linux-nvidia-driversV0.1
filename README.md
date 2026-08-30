@@ -1,45 +1,45 @@
-# nvlx: Linux-NVIDIA-Driver v1.6.6.1
+# nvlx: Linux-NVIDIA-Driver v1.6.6.2
 
-`nvlx` v1.6.6.1 hardens the runtime-owned typed observability boundary introduced in v1.6.6 by rejecting malformed diagnosis field types instead of accepting Python truthiness or implicit metric coercion.
+`nvlx` v1.6.6.2 extends the runtime-owned typed observability contract with value-domain validation, so typed metrics must now be not only correctly typed but also operationally valid before they can reach Prometheus.
 
 > [!IMPORTANT]
 > NVIDIA driver/GPU Operator resources remain read-only. The operator still mutates only nvlx-owned GPUFleet status/finalizers plus its existing Lease and Events.
 
-## v1.6.6.1 strict diagnosis contract validation
+## v1.6.6.2 typed telemetry value-domain validation
 
-- **Typed readiness fields are now strict booleans.** `ReadinessDiagnosis` rejects strings, integers and other truthy/falsy values for controller, API, leadership, inventory, preflight, checkpoint and termination gates.
-- **Typed metrics fields are now strict integers.** `MetricsDiagnosis` rejects stringified numbers, floats and booleans for exported reconcile/checkpoint telemetry.
-- **Nested diagnosis shape is validated.** Built-in `MetricsDiagnosis` requires a real `ReadinessDiagnosis`, preventing malformed nested readiness objects from being accepted by the runtime contract.
-- **HTTP independently validates diagnosis-shaped objects.** Custom runtimes that expose `readiness_diagnosis()` or `metrics_diagnosis()` cannot bypass the contract merely by returning objects with similarly named attributes.
-- **No permissive truthiness at the typed boundary.** Values such as `"false"` no longer become readiness `True` through Python's `bool()` conversion.
-- **Malformed readiness diagnoses fail closed.** `/readyz` returns the established `503 not ready` response and does not fall back to live runtime internals once a runtime has opted into the diagnosis API.
-- **Malformed metrics diagnoses remain fault-contained.** `/metrics` returns the established static `500 metrics unavailable` response without reflecting validation details or rereading legacy state.
-- **Legacy compatibility remains.** Runtimes that do not expose diagnosis methods continue through the historical readiness/metrics fallback unchanged.
-- **Prometheus and HTTP contracts remain unchanged for valid diagnoses.** Metric names, normalization, HELP/TYPE metadata, `Server: nvlx`, no-store caching and byte-accurate framing are preserved.
+- **Typed metrics must be nonnegative.** Every exported reconcile/checkpoint integer in the live diagnosis contract now rejects negative values instead of relying on the Prometheus renderer to clamp them.
+- **Reconcile accounting must be internally possible.** `reconcile_failures` cannot exceed `reconcile_total`.
+- **Restore accounting must be internally possible.** `checkpoint_restore_successes` cannot exceed `checkpoint_restore_attempts`.
+- **Reconciliation accounting must be internally possible.** `checkpoint_reconciled_commits` cannot exceed successful checkpoint writes plus proven idempotent acknowledgements.
+- **The live operator now uses `runtime_v1662`.** The new runtime layer preserves v1.6.6/v1.6.6.1 diagnosis behavior and adds value-domain validation to the current typed provider.
+- **HTTP independently enforces the same domain.** Custom runtimes that opt into `metrics_diagnosis()` cannot bypass nonnegative or relational invariants by returning diagnosis-shaped objects directly.
+- **Malformed typed metrics remain fault-contained.** `/metrics` returns the established static `500 metrics unavailable` response and does not reread legacy runtime state.
+- **Legacy compatibility remains deliberate.** Runtimes without typed diagnosis methods retain the historical exporter behavior, including nonnegative normalization for legacy numeric inputs.
+- **Readiness semantics are unchanged.** v1.6.6 single authoritative readiness evaluation and no-double-checkpoint observation remain intact.
+- **Prometheus and HTTP transport contracts are unchanged for valid diagnoses.** Metric names, HELP/TYPE metadata, ordering, `Server: nvlx`, no-store caching and byte-accurate framing are preserved.
 - **Checkpoint semantics are unchanged.** Receipt proof, canonical digest validation, ambiguity recovery, reconciliation accounting, rollback fencing, replay floors and Lease-epoch behavior are untouched.
-- **No RBAC expansion.** This release changes typed validation, HTTP diagnosis adaptation, tests, package metadata and documentation only.
+- **No RBAC expansion.** This release changes typed telemetry validation, live runtime wiring, HTTP diagnosis adaptation, tests, package metadata and documentation only.
 
 ## Validation boundary
 
-The v1.6.6.1 runtime-owned path now treats the diagnosis API as an explicit schema rather than a duck-typed convenience interface:
+The current runtime-owned metrics path now validates in two independent places:
 
-1. built-in diagnosis dataclasses validate their field types when constructed;
-2. the HTTP adapter independently validates diagnosis-shaped objects returned by custom runtimes;
-3. a runtime that implements a diagnosis method but returns an invalid object is treated as a broken diagnosis provider, not silently downgraded to the legacy path;
-4. readiness therefore fails closed and metrics use the existing bounded exporter failure response.
+1. `runtime_v1662.MetricsDiagnosis` validates strict integer typing inherited from v1.6.6.1, then validates nonnegative values and cross-counter relationships;
+2. the HTTP adapter independently validates diagnosis-shaped objects from custom typed providers before creating the frozen Prometheus snapshot.
 
-The historical fallback remains available only to runtimes that do not advertise the diagnosis methods.
+A typed provider that violates the contract is treated as broken and remains inside the existing exporter-failure boundary. The historical fallback is used only when a runtime does not advertise typed diagnosis methods.
 
 ## Safety invariants
 
-1. Typed readiness fields must be exact Python `bool` values.
-2. Typed exported metric fields must be exact Python `int` values; `bool` is not accepted as an integer metric value.
-3. Truthy strings such as `"false"` cannot authorize readiness.
-4. Malformed typed readiness diagnoses do not trigger legacy runtime fallback.
-5. Malformed typed metrics diagnoses do not trigger live-state rereads and remain inside the static `500 metrics unavailable` boundary.
-6. Valid v1.6.6 runtime-owned diagnosis objects preserve the same `/readyz` and `/metrics` output as before.
-7. Legacy/custom runtimes without diagnosis methods remain supported through the established fallback.
-8. v1.6.6 single authoritative readiness evaluation and no-double-checkpoint evaluation remain unchanged.
-9. All v1.6.5.x checkpoint receipt, reconciliation and persistence semantics remain unchanged.
-10. No new Kubernetes mutation path or RBAC permission is introduced.
-11. NVIDIA driver/GPU Operator resources remain read-only in v1.6.6.1.
+1. Typed exported metrics must be exact Python `int` values and must be nonnegative.
+2. `reconcile_failures <= reconcile_total`.
+3. `checkpoint_restore_successes <= checkpoint_restore_attempts`.
+4. `checkpoint_reconciled_commits <= checkpoint_writes + checkpoint_idempotent_acks`.
+5. Invalid typed metrics do not reach Prometheus normalization or rendering.
+6. Invalid typed metrics do not trigger legacy live-state fallback.
+7. Legacy runtimes without diagnosis methods retain their established compatibility behavior.
+8. v1.6.6.1 strict bool/int validation remains unchanged.
+9. v1.6.6 single-readiness and no-double-checkpoint diagnosis semantics remain unchanged.
+10. All v1.6.5.x checkpoint receipt, reconciliation and persistence semantics remain unchanged.
+11. No new Kubernetes mutation path or RBAC permission is introduced.
+12. NVIDIA driver/GPU Operator resources remain read-only in v1.6.6.2.
