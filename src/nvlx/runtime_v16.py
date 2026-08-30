@@ -1,11 +1,12 @@
-"""Real Kubernetes list/watch/status runtime for nvlx 1.6."""
+"""Real Kubernetes list/watch/status runtime for nvlx 1.6.x."""
 from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-import signal, threading, time
+import signal, threading
 from .k8s_api_v16 import KubeClient, ApiError
 from .operator_v15 import plan as operator_plan
 from .finalizer import decide as finalizer_decide
+from .runtime_guard_v161 import classify_watch_line, reconnect_delay
 
 PROTECTIVE_FINALIZER="nvlx.io/fleet-protection"
 
@@ -18,6 +19,7 @@ class RuntimeStats:
     leader: bool=False
     terminating: bool=False
     inventory_fresh: bool=False
+    reconnects: int=0
 
 @dataclass
 class Runtime:
@@ -30,6 +32,7 @@ class Runtime:
 
     def stop(self):
         self.stats.terminating=True
+        self.stats.leader=False
         self._stop.set()
 
     def install_signal_handlers(self):
@@ -37,7 +40,11 @@ class Runtime:
         signal.signal(signal.SIGINT,lambda *_: self.stop())
 
     def _leader(self) -> bool:
-        ok=bool(self.leader_check()) and not self.stats.terminating
+        if self.stats.terminating:
+            self.stats.leader=False; return False
+        try: ok=bool(self.leader_check())
+        except Exception:
+            ok=False
         self.stats.leader=ok
         return ok
 
@@ -47,7 +54,7 @@ class Runtime:
 
     def _event(self, obj: dict, reason: str, note: str):
         meta=obj.get("metadata",{}); name=meta.get("name",""); uid=meta.get("uid","")
-        if not name or not uid: return
+        if not name or not uid or self.stats.terminating: return
         now=datetime.now(timezone.utc).isoformat().replace("+00:00","Z")
         event={"apiVersion":"events.k8s.io/v1","kind":"Event","metadata":{"generateName":f"nvlx-{name}-","namespace":self.namespace},"eventTime":now,"reportingController":"nvlx.io/operator","reportingInstance":self.identity,"action":"Reconcile","reason":reason,"note":note[:1024],"type":"Normal","regarding":{"apiVersion":"nvlx.io/v1alpha1","kind":"GPUFleet","name":name,"uid":uid}}
         try: self.client.create_event(self.namespace,event)
@@ -61,6 +68,7 @@ class Runtime:
                 self.client.patch_status(name,rv,status); return True
             except ApiError as e:
                 if e.status not in {409,412}: raise
+                if not self._leader(): return False
                 fresh=self.client.get_fleet(name).body or {}; rv=fresh.get("metadata",{}).get("resourceVersion","")
                 if not rv: return False
         return False
@@ -69,20 +77,24 @@ class Runtime:
         meta=obj.get("metadata",{}); finalizers=list(meta.get("finalizers") or [])
         if PROTECTIVE_FINALIZER not in finalizers: return True
         annotations=meta.get("annotations") or {}; status=obj.get("status") or {}
-        decision=finalizer_decide(deleting=True,rollback_pending=annotations.get("nvlx.io/rollback-pending")=="true",quarantined_nodes=int(status.get("quarantined_nodes",0) or 0),active_execution=annotations.get("nvlx.io/active-execution")=="true",status_write_pending=False)
-        if not decision.remove_finalizer: return False
-        if not self._leader(): return False
+        try: quarantined=int(status.get("quarantined_nodes",0) or 0)
+        except (TypeError,ValueError): return False
+        decision=finalizer_decide(deleting=True,rollback_pending=annotations.get("nvlx.io/rollback-pending")=="true",quarantined_nodes=quarantined,active_execution=annotations.get("nvlx.io/active-execution")=="true",status_write_pending=False)
+        if not decision.remove_finalizer or not self._leader(): return False
         remaining=[x for x in finalizers if x != PROTECTIVE_FINALIZER]
         try:
             self.client.patch_finalizers(meta.get("name",""),meta.get("resourceVersion",""),remaining); return True
         except ApiError as e:
-            if e.status in {409,412}: return False
+            if e.status in {409,412,404,410}: return False
             raise
 
     def reconcile_object(self, obj: dict, *, event_type: str="MODIFIED") -> str:
         self.stats.reconcile_total += 1
-        meta=obj.get("metadata") or {}; name=meta.get("name",""); rv=str(meta.get("resourceVersion","") or ""); generation=int(meta.get("generation",0) or 0)
-        if not name or not rv: self.stats.reconcile_failures += 1; return "invalid"
+        if not isinstance(obj,dict): self.stats.reconcile_failures += 1; return "invalid"
+        meta=obj.get("metadata") or {}; name=meta.get("name",""); rv=str(meta.get("resourceVersion","") or "")
+        try: generation=int(meta.get("generation",0) or 0)
+        except (TypeError,ValueError): self.stats.reconcile_failures += 1; return "invalid"
+        if not name or not rv or generation < 0: self.stats.reconcile_failures += 1; return "invalid"
         self.stats.last_resource_version=rv
         if meta.get("deletionTimestamp"):
             return "finalized" if self._finalize(obj) else "finalizer-hold"
@@ -100,35 +112,49 @@ class Runtime:
 
     def list_and_watch_once(self) -> str:
         listing=self.client.list_fleets(); self.stats.api_reachable=True
-        body=listing.body or {}; rv=str(body.get("metadata",{}).get("resourceVersion","") or "")
+        body=listing.body if isinstance(listing.body,dict) else {}; rv=str(body.get("metadata",{}).get("resourceVersion","") or "")
         if not rv: raise RuntimeError("GPUFleet list did not return resourceVersion")
-        for item in body.get("items",[]):
+        items=body.get("items",[])
+        if not isinstance(items,list): raise RuntimeError("GPUFleet list items must be a list")
+        for item in items:
             if self._stop.is_set(): return "stopped"
             self.reconcile_object(item,event_type="ADDED")
         self.stats.inventory_fresh=True; self.stats.last_resource_version=rv
         try:
             for event in self.client.watch_lines(self.client.watch_path(rv)):
                 if self._stop.is_set(): return "stopped"
-                et=(event.get("type") or "").upper(); obj=event.get("object") or {}
-                if et=="ERROR":
-                    code=int(obj.get("code",0) or 0)
-                    return "relist" if code==410 else "watch-error"
-                if et=="BOOKMARK":
-                    self.stats.last_resource_version=str(obj.get("metadata",{}).get("resourceVersion",self.stats.last_resource_version)); continue
-                self.reconcile_object(obj,event_type=et)
+                decision=classify_watch_line(event)
+                if decision.action in {"ignore-malformed","ignore-unknown"}: continue
+                if decision.action in {"relist","reconnect","watch-error"}: return decision.action
+                obj=event.get("object") or {}
+                if decision.action=="bookmark":
+                    if isinstance(obj,dict):
+                        self.stats.last_resource_version=str(obj.get("metadata",{}).get("resourceVersion",self.stats.last_resource_version))
+                    continue
+                self.reconcile_object(obj,event_type=decision.action.upper())
             return "eof"
         except ApiError as e:
             self.stats.api_reachable=False
             if e.status==410: return "relist"
+            if e.status==0 or e.status in {408,425,429} or 500 <= e.status <= 599: return "reconnect"
             raise
 
     def run_forever(self, *, max_backoff: float=30.0):
-        self.install_signal_handlers(); delay=1.0
+        if max_backoff <= 0: raise ValueError("max_backoff must be positive")
+        self.install_signal_handlers(); attempt=0
         while not self._stop.is_set():
             try:
-                result=self.list_and_watch_once(); delay=1.0
+                result=self.list_and_watch_once()
                 if result=="stopped": break
+                if result in {"relist","reconnect","watch-error","eof"}:
+                    self.stats.reconnects += 1
+                    delay=reconnect_delay(attempt,maximum=max_backoff)
+                    attempt=min(attempt+1,30)
+                    if self._stop.wait(delay): break
+                    continue
+                attempt=0
             except Exception:
-                self.stats.reconcile_failures += 1; self.stats.api_reachable=False
+                self.stats.reconcile_failures += 1; self.stats.api_reachable=False; self.stats.reconnects += 1
+                delay=reconnect_delay(attempt,maximum=max_backoff)
+                attempt=min(attempt+1,30)
                 if self._stop.wait(delay): break
-                delay=min(max_backoff,delay*2)
