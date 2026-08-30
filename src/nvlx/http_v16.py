@@ -221,9 +221,17 @@ def _runtime_readiness_snapshot(runtime) -> ReadinessSnapshot:
     return _readiness_snapshot(runtime, runtime.stats)
 
 
+def _metrics_readiness_snapshot(runtime, stats) -> ReadinessSnapshot:
+    """Reuse typed readiness inside legacy metrics without silently falling back."""
+    diagnosis_fn = getattr(runtime, "readiness_diagnosis", None)
+    if callable(diagnosis_fn):
+        return _coerce_readiness_diagnosis(diagnosis_fn())
+    return _readiness_snapshot(runtime, stats)
+
+
 def _metrics_snapshot(runtime, stats) -> MetricsSnapshot:
-    """Legacy compatibility path for runtimes without typed metrics diagnosis."""
-    readiness = _readiness_snapshot(runtime, stats)
+    """Legacy metric-value path, reusing typed readiness whenever it is available."""
+    readiness = _metrics_readiness_snapshot(runtime, stats)
     return MetricsSnapshot(
         readiness=readiness,
         reconcile_total=stats.reconcile_total,

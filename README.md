@@ -1,53 +1,48 @@
-# nvlx: Linux-NVIDIA-Driver v1.6.6.4
+# nvlx: Linux-NVIDIA-Driver v1.6.6.5
 
-`nvlx` v1.6.6.4 closes the next logical gap in the runtime-owned typed readiness contract: `leader` now represents effective leadership and cannot remain true while the API is unreachable or the controller is terminating.
+`nvlx` v1.6.6.5 closes the partial typed-provider gap between readiness and Prometheus rendering. If a runtime opts into `readiness_diagnosis()` but still uses legacy metric counters, `/metrics` now reuses that strict typed readiness result instead of rereading raw `ready()`/stats/private readiness state.
 
 > [!IMPORTANT]
 > NVIDIA driver/GPU Operator resources remain read-only. The operator still mutates only nvlx-owned GPUFleet status/finalizers plus its existing Lease and Events.
 
-## v1.6.6.4 effective-leadership domain closure
+## v1.6.6.5 typed-readiness propagation into metrics fallback
 
-- **Effective leadership is now logically constrained.** Typed `leader=True` requires `api_reachable=True` and `terminating=False`.
-- **The live runtime normalizes torn captures toward safety.** `runtime_v1664` converts a post-evaluation leader observation to false when API reachability is lost or termination is active, and also clears captured leadership freshness/controller readiness in the diagnosis.
-- **Normalization does not rewrite runtime state.** The diagnosis is frozen conservatively without mutating the underlying stats object during observability reads.
-- **The live HTTP adapter independently enforces the same invariant.** `http_v1664` guards typed readiness and nested typed metrics diagnoses from custom runtimes before they enter the established HTTP presentation layer.
-- **Contradictory typed readiness fails closed.** `/readyz` returns the existing `503 not ready` response without falling back to legacy state.
-- **Contradictory typed metrics remain contained.** `/metrics` returns the existing static `500 metrics unavailable` response.
-- **Legacy compatibility remains deliberate.** Runtimes without typed diagnosis methods continue through the historical fallback unchanged.
-- **The live operator now uses `runtime_v1664` and `http_v1664`.** v1.6.6.3 logical readiness validation, v1.6.6.2 metric value-domain validation, and v1.6.6.1 strict typing remain inherited.
-- **Prometheus and HTTP transport contracts are unchanged for valid diagnoses.** Metric names, HELP/TYPE metadata, ordering, `Server: nvlx`, no-store caching, byte-accurate framing, and exporter fault containment are preserved.
-- **Checkpoint semantics are unchanged.** Receipt proof, canonical digest validation, ambiguity recovery, reconciliation accounting, rollback fencing, replay floors, and Lease-epoch behavior are untouched.
-- **No RBAC expansion.** This release changes typed diagnosis validation, live HTTP guarding, operator wiring, tests, package metadata, CI, and documentation only.
+- **Typed readiness now propagates into the legacy metric-value path.** A runtime with `readiness_diagnosis()` but no `metrics_diagnosis()` no longer gets its readiness portion rebuilt from raw runtime state during `/metrics`.
+- **No silent typed-to-legacy readiness fallback.** The metrics path strictly validates the supplied readiness diagnosis; malformed typed readiness enters the established static `500 metrics unavailable` containment path.
+- **Full typed metrics remain preferred.** Runtimes with `metrics_diagnosis()` continue to use the existing frozen typed metrics snapshot and do not perform a second readiness-diagnosis call.
+- **Legacy metric-value compatibility is preserved.** Runtimes without `metrics_diagnosis()` still use historical metric counter/gauge collection and normalization; the change affects only how readiness is sourced when a typed readiness provider exists.
+- **Legacy runtimes remain unchanged.** Runtimes with neither typed diagnosis method continue through the historical readiness and metrics fallback.
+- **The v1.6.6.4 effective-leadership guard remains active.** Partial typed readiness consumed by `/metrics` still passes through the live `http_v1664` guard, so impossible `leader=True` combinations remain fail-closed.
+- **No duplicate readiness evaluation on the full typed path.** A valid `metrics_diagnosis()` remains sufficient for one scrape.
+- **HTTP transport contracts are unchanged.** `Server: nvlx`, no-store caching, exact UTF-8 framing, deterministic framework-error handling and exporter fault containment remain intact.
+- **Checkpoint semantics are unchanged.** Receipt proof, canonical digest validation, ambiguity recovery, reconciliation accounting, rollback fencing, replay floors and Lease-epoch behavior are untouched.
+- **No RBAC expansion.** This release changes the shared HTTP metrics fallback, tests, package metadata, CI and documentation only.
 
-## Effective leadership contract
+## Partial typed-provider contract
 
-The typed observability boundary now treats `leader` as an effective serving-state assertion rather than a stale Lease cache bit:
+For `/readyz`, a runtime that implements `readiness_diagnosis()` already opts into the strict typed readiness boundary.
 
-`leader=True` implies API reachability and non-termination.
+v1.6.6.5 makes `/metrics` honor the same choice when `metrics_diagnosis()` is absent:
 
-The existing v1.6.6.3 implication remains:
+`typed readiness provider + legacy metric values -> typed readiness + legacy metric values`
 
-`leadership_fresh=True` implies API reachability, effective leadership, and non-termination.
+It no longer becomes:
 
-And controller readiness remains one-way fail-safe:
+`typed readiness provider + legacy metric values -> raw readiness reread + legacy metric values`
 
-`controller_ready=True` implies every exported serving gate passes.
-
-The live runtime may downgrade torn observations, but it never upgrades authoritative readiness or leadership.
+If the typed readiness diagnosis is malformed, `/metrics` fails closed rather than rebuilding readiness from mutable runtime internals.
 
 ## Safety invariants
 
-1. Typed readiness fields remain exact Python `bool` values.
-2. `leader=True` requires API reachability and non-termination.
-3. `leadership_fresh=True` requires API reachability, effective leadership, and non-termination.
-4. `controller_ready=True` requires every exported serving gate to pass.
-5. Built-in diagnosis normalization only downgrades contradictory observations.
-6. Observability normalization does not mutate the runtime stats object.
-7. Contradictory typed readiness does not trigger legacy fallback.
-8. Contradictory nested typed readiness does not reach Prometheus rendering.
-9. Legacy runtimes without diagnosis methods retain their established compatibility behavior.
-10. v1.6.6.2 typed metric nonnegative and relational invariants remain unchanged.
-11. v1.6.6.1 strict diagnosis type validation remains unchanged.
-12. All v1.6.5.x checkpoint receipt, reconciliation, and persistence semantics remain unchanged.
-13. No new Kubernetes mutation path or RBAC permission is introduced.
-14. NVIDIA driver/GPU Operator resources remain read-only in v1.6.6.4.
+1. Full typed `metrics_diagnosis()` remains the preferred frozen Prometheus source.
+2. A readiness-only typed provider is reused by `/metrics` and is never silently replaced with raw readiness state.
+3. Malformed readiness-only typed diagnoses cannot reach Prometheus rendering.
+4. The legacy metric-value path retains historical normalization for runtimes without typed metrics diagnoses.
+5. Runtimes with no diagnosis methods retain the established compatibility path.
+6. v1.6.6.4 effective-leadership validation remains active on typed readiness.
+7. v1.6.6.3 logical readiness validation remains unchanged.
+8. v1.6.6.2 typed metric nonnegative and relational invariants remain unchanged.
+9. v1.6.6.1 strict diagnosis type validation remains unchanged.
+10. All v1.6.5.x checkpoint receipt, reconciliation and persistence semantics remain unchanged.
+11. No new Kubernetes mutation path or RBAC permission is introduced.
+12. NVIDIA driver/GPU Operator resources remain read-only in v1.6.6.5.
