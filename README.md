@@ -1,29 +1,29 @@
-# nvlx: Linux-NVIDIA-Driver v1.6.3.6
+# nvlx: Linux-NVIDIA-Driver v1.6.3.7
 
-`nvlx` v1.6.3.6 closes a fail-open restart edge in the replay-fenced Lease-backed NVIDIA continuity checkpoint introduced across v1.6.3.3-v1.6.3.5.
+`nvlx` v1.6.3.7 adds independent read-after-write verification to the replay-fenced Lease-backed NVIDIA continuity checkpoint.
 
 > [!IMPORTANT]
 > NVIDIA driver/GPU Operator resources remain read-only. The operator still mutates only nvlx-owned GPUFleet status/finalizers plus its existing Lease and Events.
 
-## v1.6.3.6 atomic checkpoint restore
+## v1.6.3.7 checkpoint readback verification
 
-- **Restore guard is success-bound.** `nvidia_checkpoint_loaded` is set only after the Lease checkpoint has been fully read and validated.
-- **Retry after transient failure.** A failed restore leaves the guard false, so the next NVIDIA preflight retries the persisted checkpoint instead of skipping restoration.
-- **No first-observation fallback after corruption.** Repeated malformed/corrupt checkpoint reads continue to fail closed; they cannot degrade into an empty baseline that trusts the next observed NVIDIA state.
-- **Atomic in-memory assignment.** Baseline, candidate, Lease epoch, stale-epoch flag, and replay sequence are first loaded into locals and committed to runtime state only after the store returns successfully.
-- **State preservation on failure.** Existing in-memory continuity state is not partially overwritten when restore fails.
-- **Restore observability.** Runtime counters expose restore attempts and successful restores for tests and operational introspection.
-- **Replay fencing retained.** v1.6.3.5 sequence/floor checks, v1.6.3.4 Lease-transition revalidation, and all earlier continuity gates remain active.
-- **No checkpoint format change.** v1.6.3.6 continues to use the v3 Lease checkpoint and sequence-floor annotations from v1.6.3.5.
-- **No RBAC expansion.** The patch adds no permissions or Kubernetes storage resources.
+- **Independent GET after write.** A successful checkpoint PATCH is not sufficient by itself; the store performs a fresh Lease GET before reporting success.
+- **Leadership is re-proved.** The readback Lease must still be held by the current controller identity.
+- **Lease epoch is re-proved.** `leaseTransitions` must exactly match the epoch used for the committed checkpoint.
+- **Sequence floor is re-proved.** The retained floor must exactly equal the sequence just written.
+- **Checkpoint contents are re-proved.** Baseline, candidate, Lease transition and sequence must decode to the exact committed state.
+- **Canonical envelope is re-proved.** The persisted v3 envelope must exactly match the canonical integrity-checked encoding.
+- **Fail closed on readback loss or mismatch.** A missing/malformed checkpoint, leadership loss, epoch change, floor mismatch, or state mismatch causes persistence failure.
+- **Existing replay and restore fences remain active.** v1.6.3.5 replay-floor protection and v1.6.3.6 atomic restore semantics are unchanged.
+- **No RBAC expansion.** The extra verification uses the Lease GET permission already required by leader election/checkpoint persistence.
 
 ## Safety invariants
 
-1. A failed checkpoint restore can never mark persistence as successfully loaded.
-2. A later preflight must retry restoration after a transient or validation failure.
-3. Corrupt persisted state remains fail-closed on every retry until corrected.
-4. Restore failure cannot erase or partially replace the current in-memory baseline/candidate/epoch/sequence.
-5. Replay sequence and retained-floor checks remain unchanged and Kubernetes `resourceVersion` remains opaque.
-6. Lease holder/transition fencing and two-snapshot takeover revalidation remain active.
+1. Checkpoint persistence is successful only after an independent Kubernetes readback proves the committed state.
+2. A PATCH response alone cannot establish durable checkpoint success.
+3. Leadership and Lease transition epoch must remain unchanged through readback.
+4. Checkpoint sequence and retained floor must remain equal.
+5. Kubernetes `resourceVersion` remains opaque and is never numerically or lexically ordered.
+6. NVIDIA continuity baseline/candidate semantics and takeover revalidation remain unchanged.
 7. No NVIDIA driver/GPU Operator mutation path is introduced.
-8. NVIDIA resources remain read-only in v1.6.3.6.
+8. NVIDIA resources remain read-only in v1.6.3.7.
