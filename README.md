@@ -1,24 +1,24 @@
-# nvlx: Linux-NVIDIA-Driver v1.6.6.6.6.6.6.3
+# nvlx: Linux-NVIDIA-Driver v1.6.6.6.6.6.6.4
 
-`nvlx` v1.6.6.6.6.6.6.3 adds strict request-version admission to the live HTTP server. The health, readiness, and metrics surface now accepts exactly HTTP/1.0 and HTTP/1.1 request syntax, rejects legacy HTTP/0.9 and non-canonical HTTP/1.x minors through the existing terminal `505 Request Rejected` contract, and safely seeds an empty header object for legacy parser paths before the inherited body-framing gate runs.
+`nvlx` v1.6.6.6.6.6.6.4 adds HTTP/1.1 Host singleton containment and repairs the CPython 3.13 legacy HTTP/0.9 compatibility edge discovered by the v1.6.6.6.6.6.6.3 CI matrix. HTTP/1.1 requests now require exactly one non-empty Host field; duplicate, folded, empty, or list-like Host values terminate through the canonical `400 Request Rejected` path. HTTP/1.0 remains compatible without Host.
 
 > [!IMPORTANT]
 > NVIDIA driver/GPU Operator resources remain read-only. The operator still mutates only nvlx-owned GPUFleet status/finalizers plus its existing Lease and Events.
 
-## v1.6.6.6.6.6.6.3 request-version containment
+## v1.6.6.6.6.6.6.4 HTTP/1.1 Host singleton containment
 
-- **Only HTTP/1.0 and HTTP/1.1 requests are admitted.** Legacy HTTP/0.9, non-canonical spellings such as HTTP/1.01, and unsupported HTTP/1.x minors are rejected before endpoint dispatch.
-- **Unsupported versions use the canonical parser contract.** Version rejection returns fixed `505 Request Rejected` framing, `Server: nvlx`, `Cache-Control: no-store`, exact representation length, and `Connection: close`.
-- **HTTP/0.9 no longer reaches a headerless compatibility path unsafely.** The handler seeds an empty `Message` before inherited parsing so body-framing checks remain defined even when BaseHTTP does not construct parsed headers.
-- **Legacy pipelining is terminated.** Bytes following a rejected HTTP/0.9 request cannot become a second request on the same connection.
-- **HEAD version rejection remains bodyless.** Unsupported HEAD requests preserve the established representation `Content-Length` without emitting the rejection body.
-- **BaseHTTP HTTP/2+ rejection remains contained.** Existing parser-generated 505 responses keep the same canonical non-reflective framing.
-- **Body-framing precedence remains fail-closed.** Invalid `Transfer-Encoding` or `Content-Length` is still rejected as canonical `400` before the new version gate can dispatch endpoint logic.
-- **Runtime/endpoint evaluation is isolated.** Rejected versions never reach `/livez`, `/readyz`, `/metrics`, readiness diagnosis, or metrics diagnosis.
-- **Admission capacity recovers normally.** A version `505` releases its bounded worker slot like other terminal parser outcomes.
+- **The Python 3.13 HTTP/0.9 regression is repaired fail-closed.** CPython 3.13 can expose the legacy headerless HTTP/0.9 parser state as an empty `dict`; the body-framing gate now accepts only that exact empty mapping shape. Non-empty ordinary mappings remain rejected so duplicate-aware HTTP/1.x header semantics cannot silently degrade.
+- **HTTP/0.9 remains rejected.** After the compatibility repair, legacy requests continue through the v1.6.6.6.6.6.6.3 version gate and receive canonical terminal `505 Request Rejected` framing rather than reaching endpoint logic.
+- **HTTP/1.1 requires exactly one Host field.** Missing or duplicate Host fields are rejected before `/livez`, `/readyz`, or `/metrics` dispatch.
+- **Ambiguous Host values are rejected.** Empty, whitespace-only, obsolete-folded, or comma/list-like Host values use the fixed terminal `400 Request Rejected` contract.
+- **HTTP/1.0 compatibility is preserved.** HTTP/1.0 requests may continue without Host.
+- **HEAD rejection remains bodyless.** Host rejection preserves representation `Content-Length` while emitting no body for HEAD.
+- **Host rejection is terminal.** `Connection: close` prevents trailing bytes from being reinterpreted as a pipelined request.
+- **Framing and version gates remain earlier in the chain.** Invalid `Transfer-Encoding`/`Content-Length` and unsupported request versions still fail closed before Host evaluation or endpoint dispatch.
+- **Runtime/endpoint evaluation remains isolated.** Invalid Host framing cannot invoke readiness or metrics diagnosis.
+- **Admission capacity recovers normally.** Host rejection releases its bounded worker slot like other terminal parser outcomes.
 - **Existing ingress defenses remain intact.** The 8 KiB request-line budget, 32 KiB aggregate header budget, 32-field header cap, 5-second idle timeout, 5-second absolute header deadline, and 32-request admission cap are unchanged.
-- **Completed response behavior is unchanged.** Supported GET/HEAD parity, parser `400/414/431/505`, resource `404`, method `405`, metrics `500`, canonical framing, non-reflective logging, and client-abort containment remain unchanged.
-- **The live operator now uses `http_v16666663`.** The live runtime remains `runtime_v1664`.
+- **The live operator now uses `http_v16666664`.** The live runtime remains `runtime_v1664`.
 - **Checkpoint persistence, Prometheus schema, RBAC, readiness policy, and NVIDIA mutation behavior are unchanged.**
 
 ## Ingress resource model
@@ -32,20 +32,21 @@ The live server retains six independent quantitative ingress bounds:
 5. `max_request_header_bytes` — aggregate request-header byte budget, default 32768 bytes.
 6. `max_request_header_fields` — request-header field-count budget, default 32 fields.
 
-The request-line, header-byte, and header-field budgets remain independent. Two protocol invariants now sit beside those budgets: admitted requests must be bodyless, and their request version must be exactly HTTP/1.0 or HTTP/1.1.
+The quantitative budgets remain independent. Protocol invariants are enforced after parsing in a fail-closed chain: bodyless framing, exact HTTP/1.0 or HTTP/1.1 request version, then HTTP/1.1 singleton Host framing.
 
 ## Safety invariants
 
-1. Legacy HTTP/0.9 and unsupported/non-canonical HTTP/1.x requests are rejected before endpoint/runtime evaluation.
-2. Version rejection uses the existing canonical terminal `505 Request Rejected` path with `Connection: close`.
-3. The inherited body-framing gate receives a defined header object even on BaseHTTP's legacy headerless request path.
-4. Bytes following rejected legacy requests cannot become a second pipelined request.
-5. HEAD version rejection remains bodyless while preserving representation `Content-Length`.
-6. Invalid request-body framing remains fail-closed before endpoint dispatch.
-7. Version rejection releases bounded worker capacity.
-8. Header field-count, aggregate header bytes, and request-line byte budgets remain independently enforced.
-9. Silent and byte-trickle partial requests remain bounded by the inherited idle timeout and absolute parse deadline.
-10. Saturated connections never reach endpoint/runtime logic.
-11. Existing client-abort, parser-error, logging, response-body, and method containment remains unchanged.
-12. All v1.6.5.x checkpoint receipt, reconciliation, and persistence semantics remain unchanged.
-13. NVIDIA driver/GPU Operator resources remain read-only in v1.6.6.6.6.6.6.3.
+1. CPython's legacy headerless parser representation is accepted only when it is an exact empty mapping.
+2. Any non-empty mapping without duplicate-aware `get_all()` semantics is rejected by the body-framing gate.
+3. HTTP/0.9 and unsupported/non-canonical HTTP/1.x requests remain terminally rejected before endpoint/runtime evaluation.
+4. HTTP/1.1 requests require exactly one non-empty, non-folded, non-list-like Host field.
+5. Host rejection uses canonical terminal `400 Request Rejected` framing with `Connection: close`.
+6. HTTP/1.0 requests remain compatible without Host.
+7. HEAD Host rejection remains bodyless while preserving representation `Content-Length`.
+8. Rejected requests cannot process trailing pipelined bytes on the same connection.
+9. Host rejection releases bounded worker capacity.
+10. Header field-count, aggregate header bytes, and request-line byte budgets remain independently enforced.
+11. Silent and byte-trickle partial requests remain bounded by the inherited idle timeout and absolute parse deadline.
+12. Existing client-abort, parser-error, logging, response-body, and method containment remains unchanged.
+13. All v1.6.5.x checkpoint receipt, reconciliation, and persistence semantics remain unchanged.
+14. NVIDIA driver/GPU Operator resources remain read-only in v1.6.6.6.6.6.6.4.

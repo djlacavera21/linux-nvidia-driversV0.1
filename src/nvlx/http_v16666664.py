@@ -1,39 +1,37 @@
-"""Bodyless request-framing containment for nvlx 1.6.6.6.6.6.6.2."""
+"""HTTP/1.1 Host singleton containment for nvlx 1.6.6.6.6.6.6.4."""
 from __future__ import annotations
 
-from .http_v16666661 import HealthServer as HealthServerV16666661
+from .http_v16666663 import HealthServer as HealthServerV16666663
 
 
-def _request_body_framing_is_safe(headers) -> bool:
-    """Return True only for the bodyless framing accepted by live endpoints."""
+def _request_host_is_safe(request_version, headers) -> bool:
+    """Require one non-empty Host field for HTTP/1.1; keep HTTP/1.0 compatible."""
+    if request_version == "HTTP/1.0":
+        return True
+    if request_version != "HTTP/1.1":
+        return False
+
     get_all = getattr(headers, "get_all", None)
     if not callable(get_all):
-        # CPython 3.13's legacy HTTP/0.9 compatibility path can expose an empty
-        # dict instead of an email.message.Message. Accept only that exact
-        # headerless shape so duplicate-aware HTTP/1.x framing checks never
-        # silently degrade to ordinary mapping semantics.
-        return isinstance(headers, dict) and not headers
-
-    transfer_encodings = get_all("Transfer-Encoding", [])
-    if transfer_encodings:
         return False
 
-    content_lengths = get_all("Content-Length", [])
-    if not content_lengths:
-        return True
-    if len(content_lengths) != 1:
+    hosts = get_all("Host", [])
+    if len(hosts) != 1:
         return False
 
-    value = content_lengths[0]
-    if not isinstance(value, str):
+    value = hosts[0]
+    if type(value) is not str:
         return False
     if "\r" in value or "\n" in value:
         return False
-    return value.strip(" \t") == "0"
+    value = value.strip(" \t")
+    if not value or "," in value:
+        return False
+    return True
 
 
-class HealthServer(HealthServerV16666661):
-    """Reject request-body framing before endpoint or runtime evaluation."""
+class HealthServer(HealthServerV16666663):
+    """Reject ambiguous HTTP/1.1 Host framing before endpoint dispatch."""
 
     def __init__(
         self,
@@ -66,13 +64,12 @@ class HealthServer(HealthServerV16666661):
                 parsed = super().parse_request()
                 if not parsed:
                     return False
-                if _request_body_framing_is_safe(self.headers):
+                if _request_host_is_safe(self.request_version, self.headers):
                     return True
 
-                # The live surface is intentionally bodyless. Reject ambiguous
-                # framing before dispatch and terminate the connection so bytes
-                # following the header block cannot be reinterpreted as another
-                # pipelined request.
+                # HTTP/1.1 authority selection must not depend on absent,
+                # duplicate, folded, empty, or list-like Host fields. Reuse the
+                # canonical terminal parser-error surface and close the socket.
                 self.close_connection = True
                 self.send_error(400)
                 return False
@@ -80,4 +77,4 @@ class HealthServer(HealthServerV16666661):
         self.httpd.RequestHandlerClass = Handler
 
 
-__all__ = ["HealthServer", "_request_body_framing_is_safe"]
+__all__ = ["HealthServer", "_request_host_is_safe"]
