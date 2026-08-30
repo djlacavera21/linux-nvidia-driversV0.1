@@ -1,9 +1,9 @@
-"""Small stdlib Kubernetes API transport for nvlx 1.6."""
+"""Small stdlib Kubernetes API transport for nvlx 1.6.x."""
 from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 from urllib import request, error, parse
-import json, os, ssl
+import json, os, socket, ssl
 
 @dataclass(frozen=True)
 class ApiResponse:
@@ -13,9 +13,10 @@ class ApiResponse:
 
 class ApiError(RuntimeError):
     def __init__(self, status: int, reason: str):
-        super().__init__(f"Kubernetes API {status}: {reason[:240]}")
+        clean=str(reason or "request failed").replace("\n"," ").replace("\r"," ")[:240]
+        super().__init__(f"Kubernetes API {status}: {clean}")
         self.status=status
-        self.reason=reason[:240]
+        self.reason=clean
 
 class KubeClient:
     def __init__(self, base_url: str, *, token: str | None=None, ca_file: str | None=None, timeout: float=10.0):
@@ -33,20 +34,28 @@ class KubeClient:
         if not host: raise RuntimeError("KUBERNETES_SERVICE_HOST is not set")
         root=Path("/var/run/secrets/kubernetes.io/serviceaccount")
         token=(root/"token").read_text(encoding="utf-8").strip()
+        if not token: raise RuntimeError("service account token is empty")
         return cls(f"https://{host}:{port}",token=token,ca_file=str(root/"ca.crt"),timeout=timeout)
 
     def _req(self, method: str, path: str, body=None, *, content_type="application/json"):
+        if not path.startswith("/"): raise ValueError("Kubernetes API path must be absolute")
         data=None if body is None else json.dumps(body,separators=(",",":"),sort_keys=True).encode()
         headers={"Accept":"application/json"}
         if data is not None: headers["Content-Type"]=content_type
         if self.token: headers["Authorization"]="Bearer "+self.token
         return request.Request(self.base_url+path,data=data,headers=headers,method=method)
 
+    @staticmethod
+    def _decode_json(raw: bytes):
+        if not raw: return None
+        try: return json.loads(raw.decode("utf-8"))
+        except (UnicodeDecodeError,json.JSONDecodeError):
+            raise ApiError(0,"Kubernetes API returned malformed JSON") from None
+
     def request_json(self, method: str, path: str, body=None, *, content_type="application/json") -> ApiResponse:
         try:
             with request.urlopen(self._req(method,path,body,content_type=content_type),timeout=self.timeout,context=self.context) as r:
-                raw=r.read()
-                parsed=json.loads(raw.decode()) if raw else None
+                parsed=self._decode_json(r.read())
                 rv=parsed.get("metadata",{}).get("resourceVersion") if isinstance(parsed,dict) else None
                 return ApiResponse(r.status,parsed,rv)
         except error.HTTPError as e:
@@ -55,20 +64,25 @@ class KubeClient:
                 parsed=json.loads(raw); reason=parsed.get("message") or parsed.get("reason") or e.reason
             except Exception: reason=e.reason
             raise ApiError(e.code,str(reason)) from None
-        except error.URLError as e:
-            raise ApiError(0,str(getattr(e,"reason","connection failed"))) from None
+        except (error.URLError,socket.timeout,TimeoutError) as e:
+            reason=getattr(e,"reason",None) or "request timed out" if isinstance(e,(socket.timeout,TimeoutError)) else "connection failed"
+            raise ApiError(0,str(reason)) from None
 
     def watch_lines(self, path: str):
-        """Yield decoded Kubernetes watch events from a newline JSON stream."""
+        """Yield decoded Kubernetes watch events; malformed lines are ignored safely."""
         try:
             with request.urlopen(self._req("GET",path),timeout=self.timeout,context=self.context) as r:
                 for raw in r:
                     line=raw.strip()
-                    if line: yield json.loads(line.decode("utf-8"))
+                    if not line: continue
+                    try: value=json.loads(line.decode("utf-8"))
+                    except (UnicodeDecodeError,json.JSONDecodeError): continue
+                    if isinstance(value,dict): yield value
         except error.HTTPError as e:
             raise ApiError(e.code,str(e.reason)) from None
-        except error.URLError as e:
-            raise ApiError(0,str(getattr(e,"reason","connection failed"))) from None
+        except (error.URLError,socket.timeout,TimeoutError) as e:
+            reason=getattr(e,"reason",None) or "watch timed out" if isinstance(e,(socket.timeout,TimeoutError)) else "connection failed"
+            raise ApiError(0,str(reason)) from None
 
     def list_fleets(self) -> ApiResponse:
         return self.request_json("GET","/apis/nvlx.io/v1alpha1/gpufleets")
