@@ -19,23 +19,30 @@ class ApiError(RuntimeError):
         self.reason=clean
 
 class KubeClient:
-    def __init__(self, base_url: str, *, token: str | None=None, ca_file: str | None=None, timeout: float=10.0):
+    def __init__(self, base_url: str, *, token: str | None=None, ca_file: str | None=None, timeout: float=10.0, watch_timeout: float=35.0, watch_timeout_seconds: int=30):
         if not base_url.startswith(("https://","http://")): raise ValueError("base_url must be http(s)")
-        if timeout <= 0: raise ValueError("timeout must be positive")
+        if isinstance(timeout,bool) or timeout <= 0: raise ValueError("timeout must be positive")
+        if isinstance(watch_timeout,bool) or watch_timeout <= 0: raise ValueError("watch_timeout must be positive")
+        if isinstance(watch_timeout_seconds,bool) or not isinstance(watch_timeout_seconds,int) or watch_timeout_seconds < 5:
+            raise ValueError("watch_timeout_seconds must be an integer >= 5")
+        if watch_timeout <= watch_timeout_seconds:
+            raise ValueError("watch_timeout must exceed watch_timeout_seconds")
         self.base_url=base_url.rstrip("/")
         self.token=token.strip() if token else None
-        self.timeout=timeout
+        self.timeout=float(timeout)
+        self.watch_timeout=float(watch_timeout)
+        self.watch_timeout_seconds=watch_timeout_seconds
         self.context=ssl.create_default_context(cafile=ca_file) if self.base_url.startswith("https://") else None
 
     @classmethod
-    def in_cluster(cls, *, timeout: float=10.0):
+    def in_cluster(cls, *, timeout: float=10.0, watch_timeout: float=35.0, watch_timeout_seconds: int=30):
         host=os.environ.get("KUBERNETES_SERVICE_HOST")
         port=os.environ.get("KUBERNETES_SERVICE_PORT_HTTPS","443")
         if not host: raise RuntimeError("KUBERNETES_SERVICE_HOST is not set")
         root=Path("/var/run/secrets/kubernetes.io/serviceaccount")
         token=(root/"token").read_text(encoding="utf-8").strip()
         if not token: raise RuntimeError("service account token is empty")
-        return cls(f"https://{host}:{port}",token=token,ca_file=str(root/"ca.crt"),timeout=timeout)
+        return cls(f"https://{host}:{port}",token=token,ca_file=str(root/"ca.crt"),timeout=timeout,watch_timeout=watch_timeout,watch_timeout_seconds=watch_timeout_seconds)
 
     def _req(self, method: str, path: str, body=None, *, content_type="application/json"):
         if not path.startswith("/"): raise ValueError("Kubernetes API path must be absolute")
@@ -82,7 +89,7 @@ class KubeClient:
     def watch_lines(self, path: str):
         """Yield decoded Kubernetes watch events; malformed lines are ignored safely."""
         try:
-            with request.urlopen(self._req("GET",path),timeout=self.timeout,context=self.context) as r:
+            with request.urlopen(self._req("GET",path),timeout=self.watch_timeout,context=self.context) as r:
                 for raw in r:
                     line=raw.strip()
                     if not line: continue
@@ -121,5 +128,5 @@ class KubeClient:
         return self.request_json("POST","/apis/events.k8s.io/v1/namespaces/"+parse.quote(namespace,safe="")+"/events",event)
 
     def watch_path(self, resource_version: str) -> str:
-        q=parse.urlencode({"watch":"true","allowWatchBookmarks":"true","resourceVersion":resource_version})
+        q=parse.urlencode({"watch":"true","allowWatchBookmarks":"true","resourceVersion":resource_version,"timeoutSeconds":self.watch_timeout_seconds})
         return "/apis/nvlx.io/v1alpha1/gpufleets?"+q

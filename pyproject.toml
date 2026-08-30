@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "nvlx"
-version = "1.6.1.9"
-description = "Real Kubernetes NVIDIA GPU fleet operator with mandatory GPUFleet UID identity, UID-bound mutation verification, bounded watch-cache lifecycle, and fail-closed runtime fencing"
+version = "1.6.2"
+description = "Real Kubernetes NVIDIA GPU fleet operator with conflict-safe recomputation, verified Lease ownership, bounded watches, token-file auth, and fail-closed runtime fencing"
 readme = "README.md"
 requires-python = ">=3.11"
 license = {text = "MIT"}

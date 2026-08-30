@@ -29,6 +29,10 @@ class RuntimeStats:
     watch_cache_pruned: int=0
     watch_cache_evictions: int=0
     relist_deferred_objects: int=0
+    status_conflict_recomputes: int=0
+    status_conflict_fenced: int=0
+    finalizer_conflict_recomputes: int=0
+    finalizer_conflict_fenced: int=0
 
 @dataclass
 class Runtime:
@@ -193,21 +197,26 @@ class Runtime:
         return True
 
     @staticmethod
-    def _conflict_refetch_matches(fresh: object, original_meta: dict) -> tuple[bool,str]:
-        if not isinstance(fresh,dict): return False,""
-        meta=fresh.get("metadata")
-        if not isinstance(meta,dict): return False,""
-        expected_name=original_meta.get("name")
-        expected_uid=original_meta.get("uid")
-        expected_generation=original_meta.get("generation",0)
-        name=meta.get("name"); uid=meta.get("uid"); rv=meta.get("resourceVersion"); generation=meta.get("generation",0)
-        if name != expected_name: return False,""
-        if not isinstance(expected_uid,str) or not expected_uid or uid != expected_uid: return False,""
-        try:
-            if int(generation or 0) != int(expected_generation or 0): return False,""
-        except (TypeError,ValueError): return False,""
-        if not isinstance(rv,str) or not rv: return False,""
-        return True,rv
+    def _same_incarnation(fresh: object, original_meta: dict) -> bool:
+        if not Runtime._object_identity_valid(fresh): return False
+        meta=fresh["metadata"]
+        return meta.get("name")==original_meta.get("name") and meta.get("uid")==original_meta.get("uid")
+
+    @staticmethod
+    def _approval_allowed(obj: dict) -> bool:
+        meta=obj.get("metadata") or {}
+        annotations=meta.get("annotations") or {}
+        return isinstance(annotations,dict) and annotations.get("nvlx.io/approved")=="true"
+
+    def _status_plan(self, obj: dict, event_type: str) -> tuple[str,dict|None,bool]:
+        if not self._object_identity_valid(obj): return "invalid",None,False
+        meta=obj["metadata"]
+        if meta.get("deletionTimestamp"): return "deleting",None,self._approval_allowed(obj)
+        name=meta["name"]; rv=meta["resourceVersion"]; generation=int(meta.get("generation",0) or 0)
+        allowed=self._approval_allowed(obj)
+        p=operator_plan(name,event_type=event_type,resource_version=rv,generation=generation,allowed=allowed,runtime_action="execute" if allowed else "hold",mutation_fence_ok=True)
+        status=self._status_from_plan(p.reconcile) if p.action=="patch-status" and p.reconcile else None
+        return p.action,status,allowed
 
     def _event(self, obj: dict, reason: str, note: str) -> bool:
         meta=obj.get("metadata",{}); name=meta.get("name",""); uid=meta.get("uid","")
@@ -219,59 +228,128 @@ class Runtime:
             return self._event_response_verified(response,name,uid,self.identity)
         except ApiError: return False
 
-    def _patch_status(self, obj: dict, status: dict) -> bool:
+    def _patch_status_result(self, obj: dict, status: dict, *, event_type: str="MODIFIED") -> tuple[bool,dict,dict]:
         meta=obj.get("metadata",{}); name=meta.get("name",""); rv=meta.get("resourceVersion","")
-        for _ in range(2):
-            if not self._leader(): return False
-            try:
-                response=self.client.patch_status(name,rv,status)
-                return self._status_response_verified(response,meta,status)
-            except ApiError as e:
-                if e.status not in {409,412}: raise
-                if not self._leader(): return False
-                response=self.client.get_fleet(name)
-                fresh=response.body if response is not None else None
-                matches,rv=self._conflict_refetch_matches(fresh,meta)
-                if not matches: return False
-        return False
+        original_allowed=self._approval_allowed(obj)
+        if not self._leader(): return False,obj,status
+        try:
+            response=self.client.patch_status(name,rv,status)
+            return self._status_response_verified(response,meta,status),obj,status
+        except ApiError as e:
+            if e.status not in {409,412}: raise
+        if not self._leader(): return False,obj,status
+        try:
+            response=self.client.get_fleet(name)
+        except ApiError:
+            self.stats.status_conflict_fenced += 1
+            return False,obj,status
+        fresh=response.body if response is not None else None
+        if not self._same_incarnation(fresh,meta):
+            self.stats.status_conflict_fenced += 1
+            return False,obj,status
+        if fresh["metadata"].get("deletionTimestamp"):
+            self.stats.status_conflict_fenced += 1
+            return False,obj,status
+        if self._approval_allowed(fresh) != original_allowed:
+            self.stats.status_conflict_fenced += 1
+            return False,obj,status
+        action,recomputed,_allowed=self._status_plan(fresh,event_type)
+        if action!="patch-status" or recomputed is None:
+            self.stats.status_conflict_fenced += 1
+            return False,obj,status
+        self.stats.status_conflict_recomputes += 1
+        if not self._leader():
+            self.stats.status_conflict_fenced += 1
+            return False,obj,status
+        fresh_meta=fresh["metadata"]
+        try:
+            retry=self.client.patch_status(fresh_meta["name"],fresh_meta["resourceVersion"],recomputed)
+        except ApiError:
+            self.stats.status_conflict_fenced += 1
+            return False,obj,status
+        ok=self._status_response_verified(retry,fresh_meta,recomputed)
+        if not ok: self.stats.status_conflict_fenced += 1
+        return ok,fresh,recomputed
+
+    def _patch_status(self, obj: dict, status: dict, *, event_type: str="MODIFIED") -> bool:
+        ok,_fresh,_status=self._patch_status_result(obj,status,event_type=event_type)
+        return ok
+
+    @staticmethod
+    def _finalizer_plan(obj: dict) -> tuple[bool,bool,list[str]]:
+        if not Runtime._object_identity_valid(obj): return False,False,[]
+        meta=obj["metadata"]
+        finalizers=meta.get("finalizers") or []
+        if not isinstance(finalizers,list) or not all(isinstance(x,str) for x in finalizers): return False,False,[]
+        if PROTECTIVE_FINALIZER not in finalizers: return True,True,finalizers
+        if not meta.get("deletionTimestamp"): return False,False,[]
+        annotations=meta.get("annotations") or {}
+        status=obj.get("status") or {}
+        if not isinstance(annotations,dict) or not isinstance(status,dict): return False,False,[]
+        try: quarantined=int(status.get("quarantined_nodes",0) or 0)
+        except (TypeError,ValueError): return False,False,[]
+        decision=finalizer_decide(deleting=True,rollback_pending=annotations.get("nvlx.io/rollback-pending")=="true",quarantined_nodes=quarantined,active_execution=annotations.get("nvlx.io/active-execution")=="true",status_write_pending=False)
+        if not decision.remove_finalizer: return False,False,[]
+        remaining=[x for x in finalizers if x != PROTECTIVE_FINALIZER]
+        return True,False,remaining
 
     def _finalize(self, obj: dict) -> bool:
-        meta=obj.get("metadata",{}); finalizers=list(meta.get("finalizers") or [])
-        if PROTECTIVE_FINALIZER not in finalizers: return True
-        annotations=meta.get("annotations") or {}; status=obj.get("status") or {}
-        try: quarantined=int(status.get("quarantined_nodes",0) or 0)
-        except (TypeError,ValueError): return False
-        decision=finalizer_decide(deleting=True,rollback_pending=annotations.get("nvlx.io/rollback-pending")=="true",quarantined_nodes=quarantined,active_execution=annotations.get("nvlx.io/active-execution")=="true",status_write_pending=False)
-        if not decision.remove_finalizer or not self._leader(): return False
-        remaining=[x for x in finalizers if x != PROTECTIVE_FINALIZER]
+        allowed,already_done,remaining=self._finalizer_plan(obj)
+        if already_done: return True
+        if not allowed or not self._leader(): return False
+        meta=obj["metadata"]
         try:
-            response=self.client.patch_finalizers(meta.get("name",""),meta.get("resourceVersion",""),remaining)
-            return self._finalizer_response_verified(response,meta.get("name",""),remaining,meta.get("uid",""))
+            response=self.client.patch_finalizers(meta["name"],meta["resourceVersion"],remaining)
+            return self._finalizer_response_verified(response,meta["name"],remaining,meta["uid"])
         except ApiError as e:
-            if e.status in {409,412,404,410}: return False
-            raise
+            if e.status not in {409,412}: return False if e.status in {404,410} else (_ for _ in ()).throw(e)
+        if not self._leader(): return False
+        try:
+            response=self.client.get_fleet(meta["name"])
+        except ApiError:
+            self.stats.finalizer_conflict_fenced += 1
+            return False
+        fresh=response.body if response is not None else None
+        if not self._same_incarnation(fresh,meta):
+            self.stats.finalizer_conflict_fenced += 1
+            return False
+        allowed,already_done,remaining=self._finalizer_plan(fresh)
+        if already_done: return True
+        if not allowed:
+            self.stats.finalizer_conflict_fenced += 1
+            return False
+        self.stats.finalizer_conflict_recomputes += 1
+        if not self._leader():
+            self.stats.finalizer_conflict_fenced += 1
+            return False
+        fresh_meta=fresh["metadata"]
+        try:
+            retry=self.client.patch_finalizers(fresh_meta["name"],fresh_meta["resourceVersion"],remaining)
+        except ApiError:
+            self.stats.finalizer_conflict_fenced += 1
+            return False
+        ok=self._finalizer_response_verified(retry,fresh_meta["name"],remaining,fresh_meta["uid"])
+        if not ok: self.stats.finalizer_conflict_fenced += 1
+        return ok
 
     def reconcile_object(self, obj: dict, *, event_type: str="MODIFIED") -> str:
         self.stats.reconcile_total += 1
         if not self._object_identity_valid(obj): self.stats.reconcile_failures += 1; return "invalid"
-        meta=obj["metadata"]; name=meta["name"]; rv=meta["resourceVersion"]
-        generation=int(meta.get("generation",0) or 0)
+        meta=obj["metadata"]; rv=meta["resourceVersion"]
         self.stats.last_resource_version=rv
         if event_type=="DELETED" and not meta.get("deletionTimestamp"):
             return "deleted-observed"
         if meta.get("deletionTimestamp"):
             return "finalized" if self._finalize(obj) else "finalizer-hold"
         if not self._leader(): return "standby"
-        annotations=meta.get("annotations") or {}
-        allowed=isinstance(annotations,dict) and annotations.get("nvlx.io/approved")=="true"
-        p=operator_plan(name,event_type=event_type,resource_version=rv,generation=generation,allowed=allowed,runtime_action="execute" if allowed else "hold",mutation_fence_ok=True)
-        if p.action=="patch-status" and p.reconcile:
-            status=self._status_from_plan(p.reconcile)
-            if self._patch_status(obj,status):
-                self._event(obj,"Reconciled",f"GPUFleet status advanced to {status.get('phase','Unknown')}")
+        action,status,_allowed=self._status_plan(obj,event_type)
+        if action=="patch-status" and status is not None:
+            ok,applied_obj,applied_status=self._patch_status_result(obj,status,event_type=event_type)
+            if ok:
+                self._event(applied_obj,"Reconciled",f"GPUFleet status advanced to {applied_status.get('phase','Unknown')}")
                 return "patched"
             return "fenced"
-        return p.action
+        return action
 
     def list_and_watch_once(self) -> str:
         listing=self.client.list_fleets(); self.stats.api_reachable=True
@@ -313,11 +391,11 @@ class Runtime:
                     continue
                 event_type=decision.action.upper()
                 disposition=self._watch_event_disposition(obj,event_type)
-                if disposition == "invalid":
+                if disposition=="invalid":
                     self.stats.reconcile_failures += 1
                     continue
-                if disposition == "duplicate": continue
-                if disposition == "stale-generation":
+                if disposition=="duplicate": continue
+                if disposition=="stale-generation":
                     self.stats.reconcile_failures += 1
                     continue
                 self.reconcile_object(obj,event_type=event_type)

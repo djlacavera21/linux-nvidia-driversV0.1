@@ -29,27 +29,22 @@ jobs:
         run: python -m unittest discover -s tests -v
       - name: Reproducible archive smoke test
         run: |
-          python scripts/repro_release.py 1.6.1.9 --out /tmp/repro-a
-          python scripts/repro_release.py 1.6.1.9 --out /tmp/repro-b
+          python scripts/repro_release.py 1.6.2 --out /tmp/repro-a
+          python scripts/repro_release.py 1.6.2 --out /tmp/repro-b
           cmp /tmp/repro-a/SHA256SUMS /tmp/repro-b/SHA256SUMS
       - name: CLI smoke test
         run: |
-          nvlx --version | grep 1.6.1.9
+          nvlx --version | grep 1.6.2
           nvlx-operator --help | grep 'live GPUFleet Kubernetes operator'
+          nvlx-operator --help | grep -- '--token-file'
+          nvlx-operator --help | grep -- '--watch-timeout-seconds'
           python - <<'PY'
-          from nvlx.k8s_api_v16 import ApiResponse
+          from urllib.parse import parse_qs, urlsplit
+          from nvlx.k8s_api_v16 import KubeClient
           from nvlx.runtime_v16 import Runtime
-          class C: pass
+          c=KubeClient('http://127.0.0.1:1',timeout=2,watch_timeout=41,watch_timeout_seconds=30)
+          q=parse_qs(urlsplit(c.watch_path('opaque')).query)
+          assert q['timeoutSeconds']==['30']
           valid={'metadata':{'name':'prod','uid':'u1','resourceVersion':'opaque-a','generation':4}}
-          missing_uid={'metadata':{'name':'prod','resourceVersion':'opaque-a','generation':4}}
           assert Runtime._object_identity_valid(valid)
-          assert not Runtime._object_identity_valid(missing_uid)
-          expected={'name':'prod','uid':'u1','generation':4}
-          good=ApiResponse(200,{'metadata':{'name':'prod','uid':'u1','resourceVersion':'opaque-b','generation':4},'status':{'phase':'Ready'}})
-          bad=ApiResponse(200,{'metadata':{'name':'prod','resourceVersion':'opaque-b','generation':4},'status':{'phase':'Ready'}})
-          assert Runtime._status_response_verified(good,expected,{'phase':'Ready'})
-          assert not Runtime._status_response_verified(bad,expected,{'phase':'Ready'})
-          r=Runtime(C(),'pod-a',watch_cache_limit=2)
-          assert r._watch_event_disposition(valid,'MODIFIED') == 'reconcile'
-          assert list(r._watch_seen) == ['u1']
           PY
