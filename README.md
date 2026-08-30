@@ -1,49 +1,43 @@
-# nvlx: Linux-NVIDIA-Driver v1.6.6.6.4
+# nvlx: Linux-NVIDIA-Driver v1.6.6.6.5
 
-`nvlx` v1.6.6.6.4 makes the explicit live HTTP method contract resource-aware. `/livez`, `/readyz`, and `/metrics` still advertise GET/HEAD on unsupported methods, while nonexistent targets now retain the same empty `404` contract regardless of method and do not disclose `Allow` metadata.
+`nvlx` v1.6.6.6.5 makes unsupported-method rejection terminal at the HTTP transport boundary. The resource-aware `405`/`404` behavior from v1.6.6.6.4 remains intact, but rejected requests now explicitly close their connection so unread request-body bytes cannot be interpreted as a subsequent request.
 
 > [!IMPORTANT]
 > NVIDIA driver/GPU Operator resources remain read-only. The operator still mutates only nvlx-owned GPUFleet status/finalizers plus its existing Lease and Events.
 
-## v1.6.6.6.4 resource-aware method contract
+## v1.6.6.6.5 terminal method rejection
 
-- **Known live resources keep explicit method rejection.** Unsupported methods on exact `/livez`, `/readyz`, and `/metrics` targets return deterministic `405 Method Not Allowed` with `Allow: GET, HEAD`.
-- **Unknown resources no longer advertise live methods.** Unsupported methods sent to nonexistent paths return the same empty `404` used by GET/HEAD.
-- **Resource identity is exact.** Query-bearing and trailing-slash targets remain distinct nonexistent resources because the existing GET/HEAD dispatcher treats them that way.
-- **No method reflection.** Live `405` bodies remain fixed at `request rejected\n`; arbitrary method tokens and framework details are never reflected.
-- **Unknown-target 404s remain minimal.** They carry no `Allow`, no live-state `Cache-Control`, and no representation `Content-Length`.
-- **Unified GET/HEAD dispatch remains unchanged.** v1.6.6.6.2 is still authoritative for successful live requests, readiness `200/503`, metrics success/`500`, and HEAD body suppression.
+- **Rejected methods explicitly close the connection.** Known live-resource `405` responses and unknown-resource method `404` responses now send `Connection: close` and set the handler's connection state terminal.
+- **Unread request bodies cannot desynchronize a following request.** The server does not consume unsupported-method bodies; instead it guarantees that no later request is parsed on that socket.
+- **Known live resources keep the existing method contract.** Exact `/livez`, `/readyz`, and `/metrics` targets still return deterministic `405 Method Not Allowed`, `Allow: GET, HEAD`, fixed `request rejected\n`, `Cache-Control: no-store`, byte-accurate `Content-Length`, and `Server: nvlx`.
+- **Unknown targets keep the minimal `404` contract.** They remain empty and expose no `Allow`, live-state cache metadata, or representation length; the only added transport signal is `Connection: close` for unsupported methods.
+- **Arbitrary method tokens remain non-reflective.** Request method text and framework diagnostics are never copied into the response body.
+- **GET and HEAD are unchanged.** The unified dispatcher from v1.6.6.6.2 continues to serve supported requests without forced connection closure.
+- **Resource identity remains exact.** Query-bearing and trailing-slash targets are still nonexistent unless explicitly routed.
 - **Typed-provider symmetry remains intact.** Metrics-only and readiness-only diagnosis providers keep the established strict propagation and validation rules.
-- **The live operator now uses `http_v16664`.** The live runtime remains `runtime_v1664`.
+- **The live operator now uses `http_v16665`.** The live runtime remains `runtime_v1664`.
 - **Checkpoint semantics are unchanged.** Receipt proof, digest validation, ambiguity recovery, reconciliation accounting, rollback fencing, replay floors, and Lease-epoch behavior are untouched.
 - **No RBAC expansion.** No new Kubernetes mutation path is introduced.
 
-## Resource-aware rejection contract
+## Terminal rejection contract
 
-For an unsupported method targeting `/livez`, `/readyz`, or `/metrics`, the adapter returns:
+For an unsupported method targeting a known live resource, the adapter returns the established `405` response plus:
 
-- HTTP `405 Method Not Allowed`;
-- `Allow: GET, HEAD`;
-- `Content-Type: text/plain; charset=utf-8`;
-- `Cache-Control: no-store`;
-- exact `Content-Length` for `request rejected\n`;
-- stable `Server: nvlx`.
+- `Connection: close`;
+- handler `close_connection=True`.
 
-For an unsupported method targeting any other path, the adapter mirrors the established unknown-resource contract:
+For an unsupported method targeting an unknown resource, the adapter returns the established empty `404` plus `Connection: close` and closes the socket after the response.
 
-- HTTP `404`;
-- empty body;
-- no `Allow` header;
-- no live-state cache or representation-length metadata.
+This is a containment rule, not request-body parsing. The implementation deliberately avoids reading or trusting unsupported request bodies and instead terminates the transport after rejection.
 
 ## Safety invariants
 
-1. Only exact live resources advertise the GET/HEAD method contract.
-2. Unsupported methods on live resources remain deterministic, non-cacheable, and non-reflective.
-3. Unsupported methods on nonexistent resources match the empty unknown-path `404` contract.
-4. Query strings and trailing slashes do not implicitly alias live resources.
-5. Unified GET/HEAD dispatch from v1.6.6.6.2 remains unchanged.
-6. Metrics success and deterministic `500 metrics unavailable` containment remain unchanged.
+1. Unsupported methods never remain eligible for another request on the same connection.
+2. Body-bearing rejected requests cannot poison or desynchronize a following request.
+3. Only exact live resources advertise `Allow: GET, HEAD`.
+4. Unsupported methods on nonexistent resources remain empty `404` responses.
+5. Supported GET/HEAD transport behavior remains unchanged.
+6. Unified GET/HEAD dispatch, readiness `200/503`, and metrics success/`500` containment remain unchanged.
 7. v1.6.6.6 partial typed-provider symmetry remains unchanged.
 8. v1.6.6.5 readiness propagation into metrics fallback remains unchanged.
 9. v1.6.6.4 effective-leadership validation remains active.
@@ -51,4 +45,4 @@ For an unsupported method targeting any other path, the adapter mirrors the esta
 11. v1.6.6.2 typed metric value-domain validation remains unchanged.
 12. v1.6.6.1 strict diagnosis typing remains unchanged.
 13. All v1.6.5.x checkpoint receipt, reconciliation, and persistence semantics remain unchanged.
-14. NVIDIA driver/GPU Operator resources remain read-only in v1.6.6.6.4.
+14. NVIDIA driver/GPU Operator resources remain read-only in v1.6.6.6.5.
