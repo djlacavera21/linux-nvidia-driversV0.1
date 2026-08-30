@@ -1,4 +1,5 @@
 import tempfile, unittest
+from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
 from nvlx.k8s_api_v16 import ApiError, ApiResponse, KubeClient
@@ -137,7 +138,8 @@ class V162Tests(unittest.TestCase):
         self.assertEqual([c[0] for c in client.calls],["GET","POST"])
 
     def test_lease_fresh_competing_holder_is_not_taken(self):
-        lease={"metadata":{"resourceVersion":"1"},"spec":{"holderIdentity":"pod-b","leaseDurationSeconds":30,"renewTime":"2999-01-01T00:00:00Z","leaseTransitions":2}}
+        recent=datetime.now(timezone.utc).isoformat().replace("+00:00","Z")
+        lease={"metadata":{"resourceVersion":"1"},"spec":{"holderIdentity":"pod-b","leaseDurationSeconds":30,"renewTime":recent,"leaseTransitions":2}}
         client=LeaseClient(get_result=lease)
         self.assertFalse(LeaseElector(client,"pod-a").ensure_leader())
         self.assertEqual([c[0] for c in client.calls],["GET"])
