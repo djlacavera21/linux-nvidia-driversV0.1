@@ -20,6 +20,8 @@ class RuntimeStats:
     terminating: bool=False
     inventory_fresh: bool=False
     reconnects: int=0
+    duplicate_watch_events: int=0
+    stale_generation_events: int=0
 
 @dataclass
 class Runtime:
@@ -29,6 +31,7 @@ class Runtime:
     leader_check: callable=lambda: True
     stats: RuntimeStats=field(default_factory=RuntimeStats)
     _stop: threading.Event=field(default_factory=threading.Event)
+    _watch_seen: dict[str, tuple[str,str,int,str]]=field(default_factory=dict)
 
     def stop(self):
         self.stats.terminating=True
@@ -73,6 +76,28 @@ class Runtime:
         generation=meta.get("generation",0)
         try: return int(generation or 0) >= 0
         except (TypeError,ValueError): return False
+
+    def _watch_event_disposition(self, obj: object, event_type: str) -> str:
+        """Classify watch delivery without comparing opaque resourceVersion values."""
+        if not self._object_identity_valid(obj): return "invalid"
+        meta=obj["metadata"]
+        name=meta["name"]
+        uid=meta.get("uid") if isinstance(meta.get("uid"),str) else ""
+        rv=meta["resourceVersion"]
+        generation=int(meta.get("generation",0) or 0)
+        key=uid or f"name:{name}"
+        fingerprint=(event_type,uid,generation,rv)
+        previous=self._watch_seen.get(key)
+        if previous == fingerprint:
+            self.stats.duplicate_watch_events += 1
+            return "duplicate"
+        if previous is not None:
+            _prev_type,prev_uid,prev_generation,_prev_rv=previous
+            if uid and prev_uid == uid and generation < prev_generation:
+                self.stats.stale_generation_events += 1
+                return "stale-generation"
+        self._watch_seen[key]=fingerprint
+        return "reconcile"
 
     @classmethod
     def _status_response_verified(cls, response: ApiResponse | None, expected_meta: dict, expected_status: dict) -> bool:
@@ -223,10 +248,16 @@ class Runtime:
                             bookmark_rv=bookmark_meta.get("resourceVersion")
                             if isinstance(bookmark_rv,str) and bookmark_rv: self.stats.last_resource_version=bookmark_rv
                     continue
-                if not self._object_identity_valid(obj):
+                event_type=decision.action.upper()
+                disposition=self._watch_event_disposition(obj,event_type)
+                if disposition == "invalid":
                     self.stats.reconcile_failures += 1
                     continue
-                self.reconcile_object(obj,event_type=decision.action.upper())
+                if disposition == "duplicate": continue
+                if disposition == "stale-generation":
+                    self.stats.reconcile_failures += 1
+                    continue
+                self.reconcile_object(obj,event_type=event_type)
             return "eof"
         except ApiError as e:
             self.stats.api_reachable=False

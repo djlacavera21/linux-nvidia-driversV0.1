@@ -29,19 +29,22 @@ jobs:
         run: python -m unittest discover -s tests -v
       - name: Reproducible archive smoke test
         run: |
-          python scripts/repro_release.py 1.6.1.5 --out /tmp/repro-a
-          python scripts/repro_release.py 1.6.1.5 --out /tmp/repro-b
+          python scripts/repro_release.py 1.6.1.6 --out /tmp/repro-a
+          python scripts/repro_release.py 1.6.1.6 --out /tmp/repro-b
           cmp /tmp/repro-a/SHA256SUMS /tmp/repro-b/SHA256SUMS
       - name: CLI smoke test
         run: |
-          nvlx --version | grep 1.6.1.5
+          nvlx --version | grep 1.6.1.6
           nvlx-operator --help | grep 'live GPUFleet Kubernetes operator'
           python - <<'PY'
-          from nvlx.k8s_api_v16 import ApiResponse
           from nvlx.runtime_v16 import Runtime
-          event=ApiResponse(201,{'metadata':{'resourceVersion':'1'},'regarding':{'name':'prod','uid':'u1'},'reportingController':'nvlx.io/operator','reportingInstance':'pod-a'})
-          assert Runtime._event_response_verified(event,'prod','u1','pod-a')
-          assert not Runtime._event_response_verified(event,'prod','u2','pod-a')
-          assert Runtime._object_identity_valid({'metadata':{'name':'prod','resourceVersion':'10','generation':1}})
-          assert not Runtime._object_identity_valid({'metadata':{'name':'prod','resourceVersion':''}})
+          class C: pass
+          r=Runtime(C(),'pod-a',leader_check=lambda:False)
+          obj={'metadata':{'name':'prod','uid':'u1','resourceVersion':'opaque-a','generation':4}}
+          assert r._watch_event_disposition(obj,'MODIFIED') == 'reconcile'
+          assert r._watch_event_disposition(obj,'MODIFIED') == 'duplicate'
+          same_gen={'metadata':{'name':'prod','uid':'u1','resourceVersion':'opaque-b','generation':4}}
+          assert r._watch_event_disposition(same_gen,'MODIFIED') == 'reconcile'
+          stale={'metadata':{'name':'prod','uid':'u1','resourceVersion':'opaque-c','generation':3}}
+          assert r._watch_event_disposition(stale,'MODIFIED') == 'stale-generation'
           PY
