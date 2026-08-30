@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "nvlx"
-version = "1.6.3.7"
-description = "Real Kubernetes NVIDIA GPU fleet operator with independently read-back replay-fenced continuity checkpoints and fail-closed runtime safety"
+version = "1.6.3.8"
+description = "Real Kubernetes NVIDIA GPU fleet operator with idempotently reconciled, independently read-back replay-fenced continuity checkpoints"
 readme = "README.md"
 requires-python = ">=3.11"
 license = {text = "MIT"}

@@ -1,29 +1,29 @@
-# nvlx: Linux-NVIDIA-Driver v1.6.3.7
+# nvlx: Linux-NVIDIA-Driver v1.6.3.8
 
-`nvlx` v1.6.3.7 adds independent read-after-write verification to the replay-fenced Lease-backed NVIDIA continuity checkpoint.
+`nvlx` v1.6.3.8 makes Lease-backed NVIDIA continuity checkpoint persistence idempotent across ambiguous API write outcomes.
 
 > [!IMPORTANT]
 > NVIDIA driver/GPU Operator resources remain read-only. The operator still mutates only nvlx-owned GPUFleet status/finalizers plus its existing Lease and Events.
 
-## v1.6.3.7 checkpoint readback verification
+## v1.6.3.8 idempotent checkpoint commit reconciliation
 
-- **Independent GET after write.** A successful checkpoint PATCH is not sufficient by itself; the store performs a fresh Lease GET before reporting success.
-- **Leadership is re-proved.** The readback Lease must still be held by the current controller identity.
-- **Lease epoch is re-proved.** `leaseTransitions` must exactly match the epoch used for the committed checkpoint.
-- **Sequence floor is re-proved.** The retained floor must exactly equal the sequence just written.
-- **Checkpoint contents are re-proved.** Baseline, candidate, Lease transition and sequence must decode to the exact committed state.
-- **Canonical envelope is re-proved.** The persisted v3 envelope must exactly match the canonical integrity-checked encoding.
-- **Fail closed on readback loss or mismatch.** A missing/malformed checkpoint, leadership loss, epoch change, floor mismatch, or state mismatch causes persistence failure.
-- **Existing replay and restore fences remain active.** v1.6.3.5 replay-floor protection and v1.6.3.6 atomic restore semantics are unchanged.
-- **No RBAC expansion.** The extra verification uses the Lease GET permission already required by leader election/checkpoint persistence.
+- **Already-committed state is recognized.** Before writing, the store checks whether the current Lease already contains the exact requested baseline/candidate state for the active Lease transition.
+- **No duplicate sequence advance for identical state.** If the canonical checkpoint and retained floor already prove the requested state, the existing `(leaseTransition, sequence)` is returned without another PATCH.
+- **Ambiguous write outcomes are reconciled.** If a PATCH or its v1.6.3.7 verification path raises after the server may have committed the change, the store performs a fresh reconciliation GET.
+- **Timeout-after-commit can recover safely.** Reconciliation succeeds only when the current Lease independently proves the exact canonical checkpoint, current holder identity, current Lease epoch and retained sequence floor.
+- **Timeout-before-commit remains fail-closed.** If the intended checkpoint cannot be proven after an ambiguous failure, persistence fails instead of assuming success.
+- **Leadership remains mandatory.** Reconciliation refuses success if the Lease is no longer held by the current controller identity.
+- **Epoch and replay fences remain intact.** A checkpoint from an older Lease transition is never mistaken for a current idempotent commit, and sequence/floor mismatch still fails closed.
+- **v1.6.3.7 readback verification remains active.** New writes still require the independent post-write GET and canonical content verification introduced in v1.6.3.7.
+- **No RBAC expansion.** Reconciliation uses the same Lease GET/PATCH permissions already required by leader election and checkpoint persistence.
 
 ## Safety invariants
 
-1. Checkpoint persistence is successful only after an independent Kubernetes readback proves the committed state.
-2. A PATCH response alone cannot establish durable checkpoint success.
-3. Leadership and Lease transition epoch must remain unchanged through readback.
-4. Checkpoint sequence and retained floor must remain equal.
+1. An identical current checkpoint may be reused only when holder identity, Lease transition, sequence floor and canonical payload all agree.
+2. An ambiguous API failure is considered successful only if a later independent GET proves the exact intended state.
+3. Reconciliation cannot manufacture or advance a checkpoint sequence.
+4. A missing, malformed, stale-epoch, mismatched or differently owned Lease remains fail-closed.
 5. Kubernetes `resourceVersion` remains opaque and is never numerically or lexically ordered.
-6. NVIDIA continuity baseline/candidate semantics and takeover revalidation remain unchanged.
+6. Replay fencing, Lease-transition revalidation and atomic restore semantics remain unchanged.
 7. No NVIDIA driver/GPU Operator mutation path is introduced.
-8. NVIDIA resources remain read-only in v1.6.3.7.
+8. NVIDIA resources remain read-only in v1.6.3.8.
