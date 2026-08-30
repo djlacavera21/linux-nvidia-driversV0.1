@@ -29,27 +29,11 @@ jobs:
         run: python -m unittest discover -s tests -v
       - name: Reproducible archive smoke test
         run: |
-          python scripts/repro_release.py 1.6.3.6 --out /tmp/repro-a
-          python scripts/repro_release.py 1.6.3.6 --out /tmp/repro-b
+          python scripts/repro_release.py 1.6.3.7 --out /tmp/repro-a
+          python scripts/repro_release.py 1.6.3.7 --out /tmp/repro-b
           cmp /tmp/repro-a/SHA256SUMS /tmp/repro-b/SHA256SUMS
       - name: CLI smoke test
         run: |
-          nvlx --version | grep 1.6.3.6
+          nvlx --version | grep 1.6.3.7
           nvlx-operator --help | grep 'live GPUFleet Kubernetes operator'
-          python - <<'PY'
-          from nvlx.nvidia_inventory_v1631 import NvidiaInventoryError
-          from nvlx.runtime_v1636 import Runtime
-          class Store:
-              def __init__(self): self.calls=0
-              def load(self):
-                  self.calls += 1
-                  if self.calls == 1: raise NvidiaInventoryError('temporary')
-                  return None,None,4,False,0
-          s=Store(); r=Runtime(object(),'pod-a',leader_check=lambda:True); r.nvidia_checkpoint_store=s
-          try: r._restore_checkpoint_once()
-          except NvidiaInventoryError: pass
-          else: raise AssertionError('first restore must fail')
-          assert not r.nvidia_checkpoint_loaded
-          r._restore_checkpoint_once()
-          assert r.nvidia_checkpoint_loaded and s.calls == 2
-          PY
+          python -m unittest tests.test_v1637 -v
