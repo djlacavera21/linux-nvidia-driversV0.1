@@ -154,38 +154,42 @@ class HealthServer:
                     return
                 if self.path == "/metrics":
                     snapshot = _readiness_snapshot(runtime, s)
-                    body = render_metrics(
-                        leader=snapshot.leader,
-                        reconcile_total=s.reconcile_total,
-                        reconcile_failures=s.reconcile_failures,
-                        pending_approvals=0,
-                        rollback_required=0,
-                        controller_ready=snapshot.controller_ready,
-                        api_reachable=snapshot.api_reachable,
-                        leadership_fresh=snapshot.leadership_fresh,
-                        inventory_fresh=snapshot.inventory_fresh,
-                        nvidia_preflight_ready=snapshot.nvidia_preflight_ready,
-                        terminating=snapshot.terminating,
-                        checkpoint_writes=getattr(runtime, "nvidia_checkpoint_writes", 0),
-                        checkpoint_idempotent_acks=getattr(runtime, "nvidia_checkpoint_idempotent_acks", 0),
-                        checkpoint_reconciled_commits=getattr(
-                            runtime, "nvidia_checkpoint_reconciled_commits", 0
-                        ),
-                        checkpoint_rollbacks=getattr(runtime, "nvidia_checkpoint_rollbacks", 0),
-                        checkpoint_transaction_mismatches=getattr(
-                            runtime, "nvidia_checkpoint_transaction_mismatches", 0
-                        ),
-                        checkpoint_failures=getattr(runtime, "nvidia_checkpoint_failures", 0),
-                        checkpoint_restore_attempts=getattr(
-                            runtime, "nvidia_checkpoint_restore_attempts", 0
-                        ),
-                        checkpoint_restore_successes=getattr(
-                            runtime, "nvidia_checkpoint_restore_successes", 0
-                        ),
-                        checkpoint_sequence=getattr(runtime, "nvidia_checkpoint_sequence", 0),
-                        checkpoint_epoch=getattr(runtime, "nvidia_checkpoint_epoch", 0),
-                        checkpoint_ready=snapshot.checkpoint_ready,
-                    )
+                    try:
+                        body = render_metrics(
+                            leader=snapshot.leader,
+                            reconcile_total=s.reconcile_total,
+                            reconcile_failures=s.reconcile_failures,
+                            pending_approvals=0,
+                            rollback_required=0,
+                            controller_ready=snapshot.controller_ready,
+                            api_reachable=snapshot.api_reachable,
+                            leadership_fresh=snapshot.leadership_fresh,
+                            inventory_fresh=snapshot.inventory_fresh,
+                            nvidia_preflight_ready=snapshot.nvidia_preflight_ready,
+                            terminating=snapshot.terminating,
+                            checkpoint_writes=getattr(runtime, "nvidia_checkpoint_writes", 0),
+                            checkpoint_idempotent_acks=getattr(runtime, "nvidia_checkpoint_idempotent_acks", 0),
+                            checkpoint_reconciled_commits=getattr(
+                                runtime, "nvidia_checkpoint_reconciled_commits", 0
+                            ),
+                            checkpoint_rollbacks=getattr(runtime, "nvidia_checkpoint_rollbacks", 0),
+                            checkpoint_transaction_mismatches=getattr(
+                                runtime, "nvidia_checkpoint_transaction_mismatches", 0
+                            ),
+                            checkpoint_failures=getattr(runtime, "nvidia_checkpoint_failures", 0),
+                            checkpoint_restore_attempts=getattr(
+                                runtime, "nvidia_checkpoint_restore_attempts", 0
+                            ),
+                            checkpoint_restore_successes=getattr(
+                                runtime, "nvidia_checkpoint_restore_successes", 0
+                            ),
+                            checkpoint_sequence=getattr(runtime, "nvidia_checkpoint_sequence", 0),
+                            checkpoint_epoch=getattr(runtime, "nvidia_checkpoint_epoch", 0),
+                            checkpoint_ready=snapshot.checkpoint_ready,
+                        )
+                    except Exception:
+                        self._send_text(500, "metrics unavailable\n")
+                        return
                     self._send_text(
                         200,
                         body,
