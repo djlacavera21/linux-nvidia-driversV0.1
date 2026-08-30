@@ -52,13 +52,16 @@ class Runtime:
     def _status_from_plan(plan: dict) -> dict:
         return {k:v for k,v in plan.items() if k in {"phase","observed_generation","canary_wave","conditions"}}
 
-    def _event(self, obj: dict, reason: str, note: str):
+    def _event(self, obj: dict, reason: str, note: str) -> bool:
         meta=obj.get("metadata",{}); name=meta.get("name",""); uid=meta.get("uid","")
-        if not name or not uid or self.stats.terminating: return
+        if not name or not uid or self.stats.terminating: return False
+        if not self._leader(): return False
         now=datetime.now(timezone.utc).isoformat().replace("+00:00","Z")
         event={"apiVersion":"events.k8s.io/v1","kind":"Event","metadata":{"generateName":f"nvlx-{name}-","namespace":self.namespace},"eventTime":now,"reportingController":"nvlx.io/operator","reportingInstance":self.identity,"action":"Reconcile","reason":reason,"note":note[:1024],"type":"Normal","regarding":{"apiVersion":"nvlx.io/v1alpha1","kind":"GPUFleet","name":name,"uid":uid}}
-        try: self.client.create_event(self.namespace,event)
-        except ApiError: pass
+        try:
+            self.client.create_event(self.namespace,event); return True
+        except ApiError:
+            return False
 
     def _patch_status(self, obj: dict, status: dict) -> bool:
         meta=obj.get("metadata",{}); name=meta.get("name",""); rv=meta.get("resourceVersion","")
