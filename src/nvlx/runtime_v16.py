@@ -9,6 +9,8 @@ from .finalizer import decide as finalizer_decide
 from .runtime_guard_v161 import classify_watch_line, reconnect_delay
 
 PROTECTIVE_FINALIZER="nvlx.io/fleet-protection"
+WATCH_CACHE_DEFAULT_LIMIT=4096
+_LIST_SETTLED_RESULTS={"patched","status-noop","event-noop","checkpoint","finalized","deleted-observed","observe-delete"}
 
 @dataclass
 class RuntimeStats:
@@ -24,6 +26,9 @@ class RuntimeStats:
     stale_generation_events: int=0
     relist_seeded_objects: int=0
     deleted_watch_events: int=0
+    watch_cache_pruned: int=0
+    watch_cache_evictions: int=0
+    relist_deferred_objects: int=0
 
 @dataclass
 class Runtime:
@@ -32,8 +37,13 @@ class Runtime:
     namespace: str="nvlx-system"
     leader_check: callable=lambda: True
     stats: RuntimeStats=field(default_factory=RuntimeStats)
+    watch_cache_limit: int=WATCH_CACHE_DEFAULT_LIMIT
     _stop: threading.Event=field(default_factory=threading.Event)
     _watch_seen: dict[str, tuple[str,str,int,str]]=field(default_factory=dict)
+
+    def __post_init__(self):
+        if isinstance(self.watch_cache_limit,bool) or not isinstance(self.watch_cache_limit,int) or self.watch_cache_limit <= 0:
+            raise ValueError("watch_cache_limit must be a positive integer")
 
     def stop(self):
         self.stats.terminating=True
@@ -88,25 +98,47 @@ class Runtime:
         rv=meta["resourceVersion"]
         return (name,uid,generation,rv)
 
+    @staticmethod
+    def _watch_cache_key(name: str, uid: str) -> str:
+        return uid or f"name:{name}"
+
+    def _remember_watch_state(self, key: str, fingerprint: tuple[str,str,int,str]) -> None:
+        if key not in self._watch_seen and len(self._watch_seen) >= self.watch_cache_limit:
+            oldest=next(iter(self._watch_seen),None)
+            if oldest is not None:
+                self._watch_seen.pop(oldest,None)
+                self.stats.watch_cache_evictions += 1
+        self._watch_seen[key]=fingerprint
+
+    def _prune_watch_state_from_list(self, items: list[dict]) -> None:
+        present=set()
+        for item in items:
+            name,uid,_generation,_rv=self._watch_key(item)
+            present.add(self._watch_cache_key(name,uid))
+        stale=[key for key in self._watch_seen if key not in present]
+        for key in stale:
+            self._watch_seen.pop(key,None)
+        self.stats.watch_cache_pruned += len(stale)
+
     def _seed_watch_state_from_list(self, items: list[dict]) -> None:
         for item in items:
             name,uid,generation,rv=self._watch_key(item)
-            key=uid or f"name:{name}"
-            self._watch_seen[key]=("LIST",uid,generation,rv)
+            key=self._watch_cache_key(name,uid)
+            self._remember_watch_state(key,("LIST",uid,generation,rv))
             self.stats.relist_seeded_objects += 1
 
     def _watch_event_disposition(self, obj: object, event_type: str) -> str:
         """Classify watch delivery without ordering opaque resourceVersion values."""
         if not self._object_identity_valid(obj): return "invalid"
         name,uid,generation,rv=self._watch_key(obj)
-        key=uid or f"name:{name}"
+        key=self._watch_cache_key(name,uid)
         previous=self._watch_seen.get(key)
         if previous is not None:
             prev_type,prev_uid,prev_generation,prev_rv=previous
             same_state=(prev_uid==uid and prev_generation==generation and prev_rv==rv)
             if same_state:
                 if event_type=="DELETED" and prev_type!="DELETED":
-                    self._watch_seen[key]=(event_type,uid,generation,rv)
+                    self._remember_watch_state(key,(event_type,uid,generation,rv))
                     self.stats.deleted_watch_events += 1
                     return "reconcile-delete"
                 if event_type==prev_type or (event_type in {"ADDED","MODIFIED"} and prev_type in {"LIST","ADDED","MODIFIED"}):
@@ -115,7 +147,7 @@ class Runtime:
             if uid and prev_uid==uid and generation < prev_generation:
                 self.stats.stale_generation_events += 1
                 return "stale-generation"
-        self._watch_seen[key]=(event_type,uid,generation,rv)
+        self._remember_watch_state(key,(event_type,uid,generation,rv))
         if event_type=="DELETED":
             self.stats.deleted_watch_events += 1
             return "reconcile-delete"
@@ -254,10 +286,16 @@ class Runtime:
         if not all(self._object_identity_valid(item) for item in items):
             self.stats.inventory_fresh=False
             raise RuntimeError("GPUFleet list contains invalid object identity")
+        self._prune_watch_state_from_list(items)
+        settled=[]
         for item in items:
             if self._stop.is_set(): return "stopped"
-            self.reconcile_object(item,event_type="ADDED")
-        self._seed_watch_state_from_list(items)
+            result=self.reconcile_object(item,event_type="ADDED")
+            if result in _LIST_SETTLED_RESULTS:
+                settled.append(item)
+            else:
+                self.stats.relist_deferred_objects += 1
+        self._seed_watch_state_from_list(settled)
         self.stats.inventory_fresh=True; self.stats.last_resource_version=rv
         try:
             for event in self.client.watch_lines(self.client.watch_path(rv)):
