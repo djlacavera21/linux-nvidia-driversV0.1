@@ -1,46 +1,50 @@
-# nvlx: Linux-NVIDIA-Driver v1.6.5.7
+# nvlx: Linux-NVIDIA-Driver v1.6.5.8
 
-`nvlx` v1.6.5.7 minimizes HTTP server fingerprinting by replacing Python's default `BaseHTTP/... Python/...` response header with a stable product-only `Server: nvlx` token across health, readiness, metrics, exporter-failure and unknown-path responses.
+`nvlx` v1.6.5.8 contains framework-generated HTTP error responses so unsupported methods no longer receive verbose `BaseHTTPRequestHandler` HTML or reflected parser/method diagnostics.
 
 > [!IMPORTANT]
 > NVIDIA driver/GPU Operator resources remain read-only. The operator still mutates only nvlx-owned GPUFleet status/finalizers plus its existing Lease and Events.
 
-## v1.6.5.7 HTTP server fingerprint minimization
+## v1.6.5.8 HTTP framework-error containment
 
-- **Python runtime details are no longer exposed in the Server header.** The HTTP handler now returns `Server: nvlx` instead of the `BaseHTTPRequestHandler` default that includes BaseHTTP and Python version information.
-- **The product token is deliberately versionless.** The response header identifies the service without disclosing the installed nvlx or interpreter version.
-- **All response classes are covered.** `/livez` `200`, `/readyz` `200` and `503`, `/metrics` `200`, exporter-failure `500`, and unknown-path `404` responses use the same minimized server fingerprint.
-- **Health and readiness semantics are unchanged.** Liveness, authoritative readiness evaluation, Lease freshness, NVIDIA preflight and checkpoint readiness behavior are untouched.
-- **Prometheus semantics are unchanged.** Successful `/metrics` responses retain schema-closed Prometheus text format 0.0.4 output.
-- **Exporter fault containment is unchanged.** Metrics renderer failures still return the static `metrics unavailable` `500` response without leaking exception details or partial exposition.
-- **HTTP cache and framing contracts are unchanged.** Live-state text responses retain `Cache-Control: no-store` and byte-accurate UTF-8 `Content-Length`; unknown-path `404` keeps its previous empty-body framing behavior.
-- **Checkpoint semantics are unchanged.** Per-call receipts, transport-ambiguity classification, reconciliation accounting, rollback fencing and Lease-epoch rules retain their established behavior.
-- **No RBAC expansion.** This release changes only HTTP identification metadata, regression coverage, package metadata and documentation.
+- **Framework errors are now deterministic plaintext.** Errors produced by `BaseHTTPRequestHandler` use the fixed body `request rejected\n` instead of generated HTML.
+- **Unsupported methods no longer reflect request details.** The response does not echo method names, parser diagnostics, framework strings or exception details.
+- **Existing status semantics are preserved.** Unsupported methods retain the framework's `501` status rather than being silently remapped.
+- **HEAD remains bodyless.** Framework error responses to `HEAD` advertise the static error payload length but do not write response-body bytes.
+- **Error transport is hardened.** Contained framework errors use `text/plain; charset=utf-8`, `Cache-Control: no-store`, exact UTF-8 `Content-Length`, and `Server: nvlx`.
+- **Valid GET behavior is unchanged.** `/livez`, `/readyz` and `/metrics` retain their established bodies, status codes, readiness semantics and Prometheus contract.
+- **Unknown GET paths are unchanged.** The explicit empty-body `404` path remains outside the framework error helper and keeps its previous framing behavior.
+- **Exporter fault containment is unchanged.** Metrics renderer failures still return the static `metrics unavailable` `500` response with no partial exposition or exception leakage.
+- **Server fingerprint minimization is unchanged.** Responses continue to omit `BaseHTTP`, Python and nvlx version details from the `Server` header.
+- **Checkpoint semantics are unchanged.** Per-call receipts, ambiguity classification, reconciliation accounting, rollback fencing and Lease-epoch rules retain their established behavior.
+- **No RBAC expansion.** This release changes only HTTP framework-error handling, tests, package metadata and documentation.
 
-## HTTP identification contract
+## Framework-error contract
 
-All responses emitted by the nvlx health server now use:
+For framework-generated errors such as an unsupported `POST`, `DELETE` or `HEAD` request, nvlx now provides a bounded response surface:
 
-`Server: nvlx`
-
-The header intentionally omits:
-
-1. the Python interpreter version;
-2. the `BaseHTTP` implementation version;
-3. the installed nvlx package version.
-
-Existing status codes, response bodies, content types, cache policy and payload framing remain unchanged.
+1. the framework-selected HTTP status remains authoritative;
+2. `Content-Type: text/plain; charset=utf-8`;
+3. `Cache-Control: no-store`;
+4. exact UTF-8 `Content-Length`;
+5. `Server: nvlx`;
+6. fixed body `request rejected\n` for methods that permit a response body;
+7. no reflected method text, HTML template, Python version, BaseHTTP version or internal diagnostic detail.
 
 ## Safety invariants
 
-1. HTTP responses do not expose `Python/` or `BaseHTTP` version fingerprints.
-2. The stable server identity is exactly `nvlx` across `200`, `503`, `500` and `404` response classes.
-3. v1.6.5.6 exporter fault containment remains unchanged.
-4. v1.6.5.5 byte-accurate HTTP framing remains unchanged.
-5. v1.6.5.4 no-store live-state caching remains unchanged.
-6. v1.6.5.3 metric-schema closure remains unchanged.
-7. v1.6.5.2 reconciliation telemetry remains unchanged.
-8. v1.6.5.1 transport-ambiguity classification remains unchanged.
-9. v1.6.5 per-call checkpoint receipt proof remains unchanged.
-10. No new Kubernetes mutation path or RBAC permission is introduced.
-11. NVIDIA driver/GPU Operator resources remain read-only in v1.6.5.7.
+1. Framework-generated error bodies are static and do not include request or parser details.
+2. Unsupported-method errors do not expose BaseHTTP or Python fingerprints.
+3. HEAD framework errors do not write response-body bytes.
+4. Existing valid GET endpoint semantics remain unchanged.
+5. Existing unknown-path empty `404` behavior remains unchanged.
+6. v1.6.5.7 `Server: nvlx` fingerprint minimization remains unchanged.
+7. v1.6.5.6 exporter fault containment remains unchanged.
+8. v1.6.5.5 byte-accurate HTTP framing remains unchanged.
+9. v1.6.5.4 no-store live-state caching remains unchanged.
+10. v1.6.5.3 metric-schema closure remains unchanged.
+11. v1.6.5.2 reconciliation telemetry remains unchanged.
+12. v1.6.5.1 transport-ambiguity classification remains unchanged.
+13. v1.6.5 per-call checkpoint receipt proof remains unchanged.
+14. No new Kubernetes mutation path or RBAC permission is introduced.
+15. NVIDIA driver/GPU Operator resources remain read-only in v1.6.5.8.

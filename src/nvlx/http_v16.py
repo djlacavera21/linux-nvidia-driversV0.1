@@ -128,6 +128,18 @@ class HealthServer:
                 """Expose a stable product token without BaseHTTP or Python version details."""
                 return "nvlx"
 
+            def send_error(self, code, message=None, explain=None):
+                """Contain framework-generated errors without reflecting parser or method details."""
+                body = "request rejected\n"
+                payload = body.encode("utf-8")
+                self.send_response(code)
+                self.send_header("Content-Type", "text/plain; charset=utf-8")
+                self.send_header("Cache-Control", "no-store")
+                self.send_header("Content-Length", str(len(payload)))
+                self.end_headers()
+                if self.command != "HEAD":
+                    self.wfile.write(payload)
+
             def _send_text(
                 self,
                 status: int,
