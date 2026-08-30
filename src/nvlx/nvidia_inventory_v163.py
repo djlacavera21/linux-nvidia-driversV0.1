@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any
 
 from .k8s_api_v16 import ApiError, KubeClient
 
@@ -66,12 +65,12 @@ def _items(body: object, label: str) -> tuple[dict, ...]:
 
 
 class NvidiaInventory:
-    """Discover served NVIDIA APIs and build a read-only normalized snapshot."""
+    """Discover every served NVIDIA API version and build a read-only snapshot."""
 
     def __init__(self, client: KubeClient):
         self.client = client
 
-    def _discover_group(self, group: str, *, optional: bool) -> tuple[str, tuple[str, ...]] | None:
+    def _discover_group(self, group: str, *, optional: bool) -> tuple[dict[str, str], tuple[str, ...]] | None:
         try:
             response = self.client.request_json("GET", f"/apis/{group}")
         except ApiError as exc:
@@ -81,53 +80,61 @@ class NvidiaInventory:
         body = response.body
         if not isinstance(body, dict):
             raise NvidiaInventoryError(f"{group} discovery body must be an object")
+
         preferred = body.get("preferredVersion")
-        group_version = preferred.get("groupVersion") if isinstance(preferred, dict) else None
-        if not isinstance(group_version, str) or not group_version.startswith(group + "/"):
-            versions = body.get("versions")
-            group_version = None
-            if isinstance(versions, list):
-                for entry in versions:
-                    if isinstance(entry, dict):
-                        candidate = entry.get("groupVersion")
-                        if isinstance(candidate, str) and candidate.startswith(group + "/"):
-                            group_version = candidate
-                            break
-        if not group_version:
-            raise NvidiaInventoryError(f"{group} discovery has no served version")
-        version = group_version.split("/", 1)[1]
-        try:
-            resources_response = self.client.request_json("GET", f"/apis/{group}/{version}")
-        except ApiError as exc:
-            raise NvidiaInventoryError(f"cannot discover {group}/{version} resources: {exc}") from None
-        resources_body = resources_response.body
-        if not isinstance(resources_body, dict):
-            raise NvidiaInventoryError(f"{group}/{version} resource discovery must be an object")
-        resources = resources_body.get("resources")
-        if not isinstance(resources, list):
-            raise NvidiaInventoryError(f"{group}/{version} resources must be a list")
-        names: list[str] = []
-        for entry in resources:
+        preferred_group_version = preferred.get("groupVersion") if isinstance(preferred, dict) else None
+        versions = body.get("versions")
+        if not isinstance(versions, list) or not versions:
+            raise NvidiaInventoryError(f"{group} discovery has no served versions")
+
+        served: list[str] = []
+        for entry in versions:
             if not isinstance(entry, dict):
-                raise NvidiaInventoryError(f"{group}/{version} contains malformed resource discovery")
-            name = entry.get("name")
-            if isinstance(name, str) and name and "/" not in name:
-                names.append(name)
-        return version, tuple(sorted(set(names)))
+                raise NvidiaInventoryError(f"{group} discovery contains malformed version entry")
+            group_version = entry.get("groupVersion")
+            if not isinstance(group_version, str) or not group_version.startswith(group + "/"):
+                raise NvidiaInventoryError(f"{group} discovery contains invalid groupVersion")
+            version = group_version.split("/", 1)[1]
+            if version not in served:
+                served.append(version)
+
+        if isinstance(preferred_group_version, str) and preferred_group_version.startswith(group + "/"):
+            preferred_version = preferred_group_version.split("/", 1)[1]
+            if preferred_version in served:
+                served.remove(preferred_version)
+                served.insert(0, preferred_version)
+
+        resource_versions: dict[str, str] = {}
+        all_resources: set[str] = set()
+        for version in served:
+            try:
+                resources_response = self.client.request_json("GET", f"/apis/{group}/{version}")
+            except ApiError as exc:
+                raise NvidiaInventoryError(f"cannot discover {group}/{version} resources: {exc}") from None
+            resources_body = resources_response.body
+            if not isinstance(resources_body, dict):
+                raise NvidiaInventoryError(f"{group}/{version} resource discovery must be an object")
+            resources = resources_body.get("resources")
+            if not isinstance(resources, list):
+                raise NvidiaInventoryError(f"{group}/{version} resources must be a list")
+            for entry in resources:
+                if not isinstance(entry, dict):
+                    raise NvidiaInventoryError(f"{group}/{version} contains malformed resource discovery")
+                name = entry.get("name")
+                if isinstance(name, str) and name and "/" not in name:
+                    all_resources.add(name)
+                    resource_versions.setdefault(name, version)
+        return resource_versions, tuple(sorted(all_resources))
 
     def _list_discovered(
         self,
         group: str,
-        version: str,
-        resources: tuple[str, ...],
+        resource_versions: dict[str, str],
         plural: str,
-        *,
-        optional_resource: bool = True,
     ) -> tuple[dict, ...]:
-        if plural not in resources:
-            if optional_resource:
-                return ()
-            raise NvidiaInventoryError(f"required resource {plural}.{group} is not served")
+        version = resource_versions.get(plural)
+        if version is None:
+            return ()
         try:
             response = self.client.request_json("GET", f"/apis/{group}/{version}/{plural}")
         except ApiError as exc:
@@ -144,21 +151,21 @@ class NvidiaInventory:
         clusterpolicies: tuple[dict, ...] = ()
         drivers: tuple[dict, ...] = ()
         if nvidia is not None:
-            version, resources = nvidia
-            api_versions.append(("nvidia.com", version))
+            resource_versions, resources = nvidia
+            api_versions.extend(("nvidia.com", version) for version in sorted(set(resource_versions.values())))
             available.append(("nvidia.com", resources))
-            gpuclusters = self._list_discovered("nvidia.com", version, resources, "gpuclusters")
-            clusterpolicies = self._list_discovered("nvidia.com", version, resources, "clusterpolicies")
-            drivers = self._list_discovered("nvidia.com", version, resources, "nvidiadrivers")
+            gpuclusters = self._list_discovered("nvidia.com", resource_versions, "gpuclusters")
+            clusterpolicies = self._list_discovered("nvidia.com", resource_versions, "clusterpolicies")
+            drivers = self._list_discovered("nvidia.com", resource_versions, "nvidiadrivers")
 
         computedomains: tuple[dict, ...] = ()
         cliques: tuple[dict, ...] = ()
         if resource_nvidia is not None:
-            version, resources = resource_nvidia
-            api_versions.append(("resource.nvidia.com", version))
+            resource_versions, resources = resource_nvidia
+            api_versions.extend(("resource.nvidia.com", version) for version in sorted(set(resource_versions.values())))
             available.append(("resource.nvidia.com", resources))
-            computedomains = self._list_discovered("resource.nvidia.com", version, resources, "computedomains")
-            cliques = self._list_discovered("resource.nvidia.com", version, resources, "computedomaincliques")
+            computedomains = self._list_discovered("resource.nvidia.com", resource_versions, "computedomains")
+            cliques = self._list_discovered("resource.nvidia.com", resource_versions, "computedomaincliques")
 
         try:
             nodes_response = self.client.request_json("GET", "/api/v1/nodes")
@@ -225,9 +232,6 @@ class NvidiaInventory:
         if mode == "dra":
             resources = dict(snapshot.available_resources).get("resource.nvidia.com", ())
             if "computedomains" not in resources:
-                # ComputeDomain can be disabled, so absence is recorded only when
-                # GPUCluster explicitly enables it. The managed 26.7 default is
-                # enabled, but a user may opt out.
                 spec = gpuclusters[0].get("spec") if len(gpuclusters) == 1 else {}
                 dra = spec.get("draDriver") if isinstance(spec, dict) else {}
                 compute = dra.get("computeDomains") if isinstance(dra, dict) else {}
