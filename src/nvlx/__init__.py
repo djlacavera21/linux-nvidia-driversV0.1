@@ -1,3 +1,3 @@
 """Linux NVIDIA driver toolkit."""
 
-__version__ = "1.6.2.3"
+__version__ = "1.6.2.4"
