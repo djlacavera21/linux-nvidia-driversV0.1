@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "nvlx"
-version = "1.6.2.8"
-description = "Real Kubernetes NVIDIA GPU fleet operator with settlement-bound watch cursor semantics, retry-safe watch dedupe, semantic finalizer preservation, generation-bound mutation verification, and fail-closed runtime safety"
+version = "1.6.2.9"
+description = "Real Kubernetes NVIDIA GPU fleet operator with atomic relist settlement barriers, settlement-bound watch cursor semantics, retry-safe watch dedupe, semantic finalizer preservation, and fail-closed runtime safety"
 readme = "README.md"
 requires-python = ">=3.11"
 license = {text = "MIT"}
