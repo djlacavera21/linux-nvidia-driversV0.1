@@ -99,7 +99,7 @@ def _leadership_fresh_observation(
 
 
 def _readiness_snapshot(runtime, stats) -> ReadinessSnapshot:
-    """Evaluate authoritative readiness and capture one coherent post-evaluation gate state."""
+    """Legacy compatibility path for runtimes without typed diagnosis."""
     ready_fn = getattr(runtime, "ready", None)
     if callable(ready_fn):
         controller_ready = _runtime_ready(runtime, stats)
@@ -137,8 +137,42 @@ def _readiness_snapshot(runtime, stats) -> ReadinessSnapshot:
     )
 
 
+def _coerce_readiness_diagnosis(diagnosis) -> ReadinessSnapshot:
+    """Normalize a runtime-owned typed diagnosis to the HTTP presentation shape."""
+    return ReadinessSnapshot(
+        controller_ready=bool(diagnosis.controller_ready),
+        api_reachable=bool(diagnosis.api_reachable),
+        leader=bool(diagnosis.leader),
+        leadership_fresh=bool(diagnosis.leadership_fresh),
+        inventory_fresh=bool(diagnosis.inventory_fresh),
+        nvidia_preflight_ready=bool(diagnosis.nvidia_preflight_ready),
+        checkpoint_ready=bool(diagnosis.checkpoint_ready),
+        terminating=bool(diagnosis.terminating),
+    )
+
+
+def _runtime_readiness_snapshot(runtime) -> ReadinessSnapshot:
+    """Prefer runtime-owned diagnosis; retain the historical fallback for compatibility."""
+    diagnosis_fn = getattr(runtime, "readiness_diagnosis", None)
+    if callable(diagnosis_fn):
+        try:
+            return _coerce_readiness_diagnosis(diagnosis_fn())
+        except Exception:
+            return ReadinessSnapshot(
+                controller_ready=False,
+                api_reachable=False,
+                leader=False,
+                leadership_fresh=False,
+                inventory_fresh=False,
+                nvidia_preflight_ready=False,
+                checkpoint_ready=False,
+                terminating=False,
+            )
+    return _readiness_snapshot(runtime, runtime.stats)
+
+
 def _metrics_snapshot(runtime, stats) -> MetricsSnapshot:
-    """Capture every mutable source used by one metrics response exactly once."""
+    """Legacy compatibility path for runtimes without typed metrics diagnosis."""
     readiness = _readiness_snapshot(runtime, stats)
     return MetricsSnapshot(
         readiness=readiness,
@@ -163,6 +197,33 @@ def _metrics_snapshot(runtime, stats) -> MetricsSnapshot:
         checkpoint_sequence=getattr(runtime, "nvidia_checkpoint_sequence", 0),
         checkpoint_epoch=getattr(runtime, "nvidia_checkpoint_epoch", 0),
     )
+
+
+def _coerce_metrics_diagnosis(diagnosis) -> MetricsSnapshot:
+    """Normalize a runtime-owned metrics diagnosis without consulting live runtime state."""
+    return MetricsSnapshot(
+        readiness=_coerce_readiness_diagnosis(diagnosis.readiness),
+        reconcile_total=diagnosis.reconcile_total,
+        reconcile_failures=diagnosis.reconcile_failures,
+        checkpoint_writes=diagnosis.checkpoint_writes,
+        checkpoint_idempotent_acks=diagnosis.checkpoint_idempotent_acks,
+        checkpoint_reconciled_commits=diagnosis.checkpoint_reconciled_commits,
+        checkpoint_rollbacks=diagnosis.checkpoint_rollbacks,
+        checkpoint_transaction_mismatches=diagnosis.checkpoint_transaction_mismatches,
+        checkpoint_failures=diagnosis.checkpoint_failures,
+        checkpoint_restore_attempts=diagnosis.checkpoint_restore_attempts,
+        checkpoint_restore_successes=diagnosis.checkpoint_restore_successes,
+        checkpoint_sequence=diagnosis.checkpoint_sequence,
+        checkpoint_epoch=diagnosis.checkpoint_epoch,
+    )
+
+
+def _runtime_metrics_snapshot(runtime) -> MetricsSnapshot:
+    """Prefer the runtime-owned frozen metrics diagnosis for live runtimes."""
+    diagnosis_fn = getattr(runtime, "metrics_diagnosis", None)
+    if callable(diagnosis_fn):
+        return _coerce_metrics_diagnosis(diagnosis_fn())
+    return _metrics_snapshot(runtime, runtime.stats)
 
 
 def _render_metrics_snapshot(snapshot: MetricsSnapshot) -> str:
@@ -233,12 +294,11 @@ class HealthServer:
 
             def do_GET(self):
                 runtime = outer.runtime
-                s = runtime.stats
                 if self.path == "/livez":
                     self._send_text(200, "ok\n")
                     return
                 if self.path == "/readyz":
-                    snapshot = _readiness_snapshot(runtime, s)
+                    snapshot = _runtime_readiness_snapshot(runtime)
                     self._send_text(
                         200 if snapshot.controller_ready else 503,
                         "ready\n" if snapshot.controller_ready else "not ready\n",
@@ -246,7 +306,7 @@ class HealthServer:
                     return
                 if self.path == "/metrics":
                     try:
-                        snapshot = _metrics_snapshot(runtime, s)
+                        snapshot = _runtime_metrics_snapshot(runtime)
                         body = _render_metrics_snapshot(snapshot)
                     except Exception:
                         self._send_text(500, "metrics unavailable\n")
