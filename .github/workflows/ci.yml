@@ -29,12 +29,12 @@ jobs:
         run: python -m unittest discover -s tests -v
       - name: Reproducible archive smoke test
         run: |
-          python scripts/repro_release.py 1.6.1 --out /tmp/repro-a
-          python scripts/repro_release.py 1.6.1 --out /tmp/repro-b
+          python scripts/repro_release.py 1.6.1.1 --out /tmp/repro-a
+          python scripts/repro_release.py 1.6.1.1 --out /tmp/repro-b
           cmp /tmp/repro-a/SHA256SUMS /tmp/repro-b/SHA256SUMS
       - name: CLI smoke test
         run: |
-          nvlx --version | grep 1.6.1
+          nvlx --version | grep 1.6.1.1
           nvlx-operator --help | grep 'live GPUFleet Kubernetes operator'
           python - <<'PY'
           from nvlx.runtime_guard_v161 import classify_watch_line, reconnect_delay
