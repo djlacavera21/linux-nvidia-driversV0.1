@@ -1,45 +1,38 @@
-# nvlx: Linux-NVIDIA-Driver v1.6.5
+# nvlx: Linux-NVIDIA-Driver v1.6.5.1
 
-`nvlx` v1.6.5 hardens idempotent NVIDIA continuity checkpoint acknowledgements by replacing coarse store-class capability trust with a typed proof returned by the exact checkpoint save call.
+`nvlx` v1.6.5.1 narrows ambiguous NVIDIA continuity checkpoint reconciliation so only transport-level outcomes that may have committed are eligible for same-call recovery. Deterministic validation failures now remain failures even if a later read could find matching state.
 
 > [!IMPORTANT]
 > NVIDIA driver/GPU Operator resources remain read-only. The operator still mutates only nvlx-owned GPUFleet status/finalizers plus its existing Lease and Events.
 
-## v1.6.5 per-call checkpoint commit receipts
+## v1.6.5.1 narrow ambiguous-write reconciliation
 
-- **Every modern checkpoint save can return a typed receipt.** `CheckpointCommitReceipt` carries the Lease transition epoch, sequence, idempotent-reuse flag, ambiguous-write reconciliation flag and SHA-256 of the exact canonical checkpoint envelope.
-- **Equal-sequence acknowledgements require proof from that call.** The v1.6.5 runtime no longer accepts a non-advancing checkpoint merely because a store advertises `proves_idempotent_commits` at class level.
-- **Canonical state is bound into the proof.** The runtime recomputes the canonical checkpoint envelope from its current baseline/candidate plus the returned epoch and sequence, hashes it, and requires an exact digest match before trusting the receipt.
-- **Ambiguous writes remain recoverable.** A timeout or transport failure after a successful commit can still be reconciled by a fresh Lease read; the resulting receipt explicitly records `idempotent=True` and `reconciled=True`.
-- **Exact pre-existing commits are explicit.** A save that finds the requested canonical state already committed returns an idempotent receipt without rewriting the Lease.
-- **New writes are distinguishable.** A freshly advanced checkpoint returns `idempotent=False` and `reconciled=False`.
-- **The historical tuple API remains available.** `LeaseCheckpointStore.save()` still returns `(lease_transition, sequence)` for older callers.
-- **Tuple-only custom stores remain compatible for advancing sequences.** They may continue to advance the checkpoint sequence, but they cannot prove an equal-sequence acknowledgement under the v1.6.5 runtime.
-- **Rollback and cross-epoch fences remain unchanged.** Lower sequences still fail closed and equal sequences from a different Lease epoch remain invalid.
-- **The live operator now uses the v1.6.5 receipt-aware store and runtime.** Existing readiness telemetry, Prometheus exposition, checkpoint readback verification and replay-floor behavior remain intact.
-- **No RBAC expansion.** The receipt is an in-process proof object derived from state already read or written through the existing Lease path.
+- **Reconciliation is now eligibility-gated.** Same-call recovery is attempted only when a PATCH or post-write readback fails with a transport-level unknown outcome, including Kubernetes transport `ApiError(status=0)` and direct timeout/connection failures from compatible clients.
+- **Deterministic safety failures are not rescued.** Malformed write responses, leadership or Lease-epoch changes, checkpoint/floor mismatches, canonical readback mismatches and other explicit validation errors fail immediately without being converted into idempotent success.
+- **Explicit HTTP errors remain fail-closed in the current call.** Nonzero Kubernetes API error responses do not trigger ambiguous-write reconciliation. If the canonical state was nevertheless committed, a later save may safely discover it through the normal pre-existing-commit path.
+- **Write conflicts retain their existing bounded retry.** HTTP 409/412 conflicts still retry through the established two-attempt resourceVersion loop.
+- **Post-write transport loss remains recoverable.** If the PATCH may have committed but the response is lost, a fresh Lease GET can prove the exact canonical checkpoint and return a reconciled idempotent receipt.
+- **Readback transport loss remains recoverable.** If the independent verification GET fails at the transport layer after a verified PATCH response, a fresh reconciliation GET can prove the exact commit.
+- **Per-call receipt proof remains mandatory.** Equal-sequence acknowledgements still require the v1.6.5 `CheckpointCommitReceipt`, exact canonical SHA-256, matching Lease epoch and `idempotent=True`.
+- **No checkpoint envelope or replay-floor change.** Canonical v3 checkpoint encoding, sequence floor, readback validation, rollback fencing and Lease transition semantics are unchanged.
+- **No readiness or telemetry change.** Closed readiness snapshots and standards-clean Prometheus HELP/TYPE/UTF-8 exposition remain unchanged.
+- **No RBAC expansion.** The live operator uses the new v1.6.5.1 store over the same Lease path and permissions.
 
-## Commit receipt contract
+## Recovery classification
 
-A `CheckpointCommitReceipt` contains:
+A write is eligible for same-call reconciliation only when nvlx cannot know from the transport whether the write reached Kubernetes. A deterministic response or validation failure is not treated as ambiguous.
 
-- `lease_transition` — the verified Lease transition epoch;
-- `sequence` — the verified checkpoint sequence;
-- `idempotent` — whether this call reused a canonical commit that already existed;
-- `reconciled` — whether that reuse was established after an ambiguous write outcome;
-- `canonical_sha256` — SHA-256 of the exact canonical checkpoint envelope for the saved runtime state.
-
-`reconciled=True` is valid only when `idempotent=True`.
+This keeps recovery conservative: uncertainty may be proven by a fresh canonical read, while explicit safety violations cannot be overwritten by later evidence in the same operation.
 
 ## Safety invariants
 
-1. A non-advancing checkpoint sequence is accepted only with a valid per-call `CheckpointCommitReceipt` marked idempotent.
-2. The receipt digest must match the runtime's exact canonical baseline/candidate, Lease epoch and sequence.
-3. A class-level capability flag alone cannot authorize an equal-sequence acknowledgement in the v1.6.5 runtime.
-4. Equal-sequence acknowledgements from another Lease epoch remain rejected.
-5. Lower checkpoint sequences remain rollback failures and continue to increment rollback telemetry.
-6. Fresh advancing writes remain compatible with tuple-only stores.
-7. The legacy `(epoch, sequence)` store API remains available for older callers.
-8. Readiness, leadership snapshot closure, Prometheus HELP/TYPE metadata and UTF-8 exposition remain unchanged.
+1. Same-call reconciliation is reserved for transport-unknown write or post-write readback outcomes.
+2. Deterministic checkpoint validation failures remain fail-closed and are never converted into a reconciled receipt.
+3. Reconciled receipts still require an exact current Lease holder, Lease transition, sequence floor, baseline/candidate and canonical envelope match.
+4. Equal-sequence runtime acceptance still requires exact per-call receipt proof and canonical SHA-256 validation.
+5. Lower checkpoint sequences remain rollback failures; cross-epoch equal sequences remain invalid.
+6. HTTP 409/412 write conflicts retain bounded retry behavior.
+7. The historical tuple `save()` API and advancing tuple-only custom stores remain compatible through v1.6.5 semantics.
+8. Readiness, leadership telemetry and Prometheus exposition are unchanged.
 9. No new Kubernetes mutation path or RBAC permission is introduced.
-10. NVIDIA driver/GPU Operator resources remain read-only in v1.6.5.
+10. NVIDIA driver/GPU Operator resources remain read-only in v1.6.5.1.
