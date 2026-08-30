@@ -4,7 +4,8 @@ import argparse, os
 from pathlib import Path
 from .k8s_api_v16 import KubeClient
 from .lease_v16 import LeaseElector
-from .runtime_v1629 import Runtime
+from .nvidia_inventory_v163 import NvidiaInventory
+from .runtime_v163 import Runtime
 from .http_v16 import HealthServer
 
 def _read_token_file(path: str) -> str:
@@ -35,7 +36,9 @@ def main(argv=None):
     kwargs={"timeout":a.timeout,"watch_timeout":a.watch_timeout,"watch_timeout_seconds":a.watch_timeout_seconds}
     client=KubeClient(a.server,token=token,**kwargs) if a.server else KubeClient.in_cluster(**kwargs)
     elector=LeaseElector(client,a.identity,namespace=a.namespace)
+    inventory=NvidiaInventory(client)
     runtime=Runtime(client,a.identity,namespace=a.namespace,leader_check=elector.ensure_leader,leader_fresh_seconds=25.0)
+    runtime.nvidia_inventory_check=inventory.check
     server=HealthServer(runtime,a.health_host,a.health_port).start()
     try:
         if a.once:
