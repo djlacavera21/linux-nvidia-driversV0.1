@@ -71,7 +71,7 @@ class V1619Tests(unittest.TestCase):
     def test_conflict_refetch_requires_uid(self):
         original=self.fleet()["metadata"]
         fresh={"metadata":{"name":"prod","resourceVersion":"11","generation":1}}
-        self.assertEqual(Runtime._conflict_refetch_matches(fresh,original),(False,""))
+        self.assertFalse(Runtime._same_incarnation(fresh,original))
 
     def test_conflict_retry_stops_when_refetch_uid_missing(self):
         client=ConflictClient({"metadata":{"name":"prod","resourceVersion":"11","generation":1}})
