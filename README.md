@@ -1,44 +1,45 @@
-# nvlx: Linux-NVIDIA-Driver v1.6.6.6.6.1
+# nvlx: Linux-NVIDIA-Driver v1.6.6.6.6.2
 
-`nvlx` v1.6.6.6.6.1 canonicalizes the explicit zero-length framing accepted by the live GET/HEAD surface. Exact `/livez`, `/readyz`, and `/metrics` requests remain bodyless, but when `Content-Length` is present the only accepted field value is exactly `0`.
+`nvlx` v1.6.6.6.6.2 makes framework-generated HTTP parser errors deterministic and terminal. Malformed request syntax, oversized request lines, header-overflow errors, and unsupported HTTP versions now use the same fixed plaintext containment style as the hardened live endpoint transport and explicitly close the connection.
 
 > [!IMPORTANT]
 > NVIDIA driver/GPU Operator resources remain read-only. The operator still mutates only nvlx-owned GPUFleet status/finalizers plus its existing Lease and Events.
 
-## v1.6.6.6.6.1 canonical zero-length framing
+## v1.6.6.6.6.2 terminal parser-error containment
 
-- **Only exact `Content-Length: 0` is accepted.** Alternate zero encodings such as `00`, `000`, signed forms, hexadecimal-looking forms, or comma-joined values are rejected.
-- **No length header remains valid.** Bodyless live GET/HEAD requests do not need to send `Content-Length`.
-- **Duplicate lengths remain invalid.** Even repeated canonical zero fields retain the v1.6.6.6.6 fail-closed behavior.
-- **Any `Transfer-Encoding` remains invalid.** Chunked or alternate request-body framing never reaches the live endpoint logic.
-- **Rejection precedes runtime evaluation.** Noncanonical framing on `/readyz` or `/metrics` cannot invoke readiness diagnosis, checkpoint observation, metrics capture, or rendering.
-- **Rejection remains terminal.** Invalid live framing returns deterministic `400 request rejected\n`, sets `Connection: close`, and prevents a following request from being parsed on that connection.
-- **HEAD remains bodyless.** Invalid HEAD requests return the same status and representation metadata as GET but no response-body bytes.
-- **Unknown paths retain the existing `404` contract.** The canonical framing rule applies only to exact live resources.
-- **Unsupported-method behavior remains unchanged.** v1.6.6.6.5 terminal resource-aware `405`/`404` rejection remains authoritative for methods other than GET/HEAD.
-- **The live operator now uses `http_v166661`.** The live runtime remains `runtime_v1664`.
-- **Checkpoint, RBAC, readiness, metrics schema, and NVIDIA mutation semantics are unchanged.**
+- **Parser errors never reflect request details.** Framework messages such as bad request syntax, oversized URI/request-line descriptions, header parser diagnostics, and HTTP-version text are not returned to clients.
+- **Covered parser statuses are explicit.** Inherited parser-generated `400`, `414`, `431`, and `505` responses are rewritten to the fixed `request rejected\n` representation.
+- **Parser errors are connection-terminal.** Every contained parser error sets `Connection: close` and handler `close_connection=True`.
+- **Following pipelined requests cannot survive a parse failure.** Once parsing fails, no later request is eligible to run on the same socket.
+- **Framing remains byte-accurate.** Parser-error responses use `text/plain; charset=utf-8`, `Cache-Control: no-store`, exact `Content-Length`, and stable `Server: nvlx`.
+- **Existing live request guards remain authoritative.** Canonical `Content-Length: 0`, `Transfer-Encoding` rejection, bodyless GET/HEAD rules, and the v1.6.6.6.6.1 framing contract are unchanged.
+- **Method rejection remains unchanged.** Unsupported methods on exact live resources still return terminal `405 Method Not Allowed` with `Allow: GET, HEAD`; unknown resources retain their resource-aware `404` behavior.
+- **Live endpoint semantics are unchanged.** `/livez`, `/readyz`, and `/metrics` retain unified GET/HEAD dispatch, readiness `200/503`, metrics success/`500`, HEAD parity, and typed diagnosis propagation.
+- **The live operator now uses `http_v166662`.** The live runtime remains `runtime_v1664`.
+- **Checkpoint, Prometheus schema, RBAC, readiness policy, and NVIDIA mutation semantics are unchanged.**
 
-## Canonical framing contract
+## Parser containment contract
 
-For exact `/livez`, `/readyz`, and `/metrics` GET/HEAD requests:
+For framework parser failures with status `400`, `414`, `431`, or `505`, the live server returns:
 
-- `Transfer-Encoding` is forbidden;
-- zero or one `Content-Length` field is permitted;
-- when present, the parsed field value must be exactly the ASCII string `0`;
-- all other request-body framing fails closed before endpoint evaluation.
+- the original status code;
+- fixed `request rejected\n` plaintext representation;
+- `Content-Type: text/plain; charset=utf-8`;
+- `Cache-Control: no-store`;
+- exact representation `Content-Length`;
+- `Connection: close`;
+- stable `Server: nvlx`.
 
-This narrows representation syntax only. It does not change the successful live endpoint representations, readiness policy, Prometheus schema, typed diagnosis contracts, checkpoint receipts/reconciliation, or Kubernetes mutation scope.
+The parser-supplied message and explanation arguments are ignored. This is a transport-containment change only; accepted request parsing and all endpoint logic remain unchanged.
 
 ## Safety invariants
 
-1. Exact live GET/HEAD resources remain bodyless.
-2. The only explicit accepted length is canonical `Content-Length: 0`.
-3. Noncanonical zero spellings never reach endpoint logic.
-4. Invalid live framing remains deterministic, non-reflective, and terminal.
-5. Valid GET/HEAD, readiness `200/503`, metrics success/`500`, and HEAD parity remain unchanged.
-6. Unknown-resource `404` identity remains unchanged.
-7. v1.6.6.6.5 terminal unsupported-method transport remains unchanged.
-8. v1.6.6.6 typed-provider symmetry and all v1.6.6.x diagnosis validation remain unchanged.
-9. All v1.6.5.x checkpoint receipt, reconciliation, and persistence semantics remain unchanged.
-10. NVIDIA driver/GPU Operator resources remain read-only in v1.6.6.6.6.1.
+1. Parser-generated `400/414/431/505` responses are fixed-body and non-reflective.
+2. Parser failures are always terminal for the current connection.
+3. A malformed request cannot be followed by a processed pipelined request on the same socket.
+4. v1.6.6.6.6.1 canonical zero-length framing remains unchanged.
+5. v1.6.6.6.5 terminal unsupported-method transport remains unchanged.
+6. Unified GET/HEAD dispatch, readiness `200/503`, metrics success/`500`, and HEAD parity remain unchanged.
+7. Typed-provider symmetry and all v1.6.6.x diagnosis validation remain unchanged.
+8. All v1.6.5.x checkpoint receipt, reconciliation, and persistence semantics remain unchanged.
+9. NVIDIA driver/GPU Operator resources remain read-only in v1.6.6.6.6.2.
