@@ -15,7 +15,7 @@ def ident(uid="u1"):
         api_versions=(("nvidia.com","v1"),),
         available_resources=(("nvidia.com",("clusterpolicies",)),),
         gpuclusters=(), clusterpolicies=(("cluster-policy",uid,"nvidia.com/v1"),), drivers=(),
-        computedomains=(), computedomaincliques=(), gpu_nodes=(("gpu-1","node-u1","v1"),),
+        computedomains=(), computedomaincliques=(), gpu_nodes=(),
     )
 
 
