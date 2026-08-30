@@ -29,18 +29,19 @@ jobs:
         run: python -m unittest discover -s tests -v
       - name: Reproducible archive smoke test
         run: |
-          python scripts/repro_release.py 1.6.3.5 --out /tmp/repro-a
-          python scripts/repro_release.py 1.6.3.5 --out /tmp/repro-b
+          python scripts/repro_release.py 1.6.3.6 --out /tmp/repro-a
+          python scripts/repro_release.py 1.6.3.6 --out /tmp/repro-b
           cmp /tmp/repro-a/SHA256SUMS /tmp/repro-b/SHA256SUMS
       - name: CLI smoke test
         run: |
-          nvlx --version | grep 1.6.3.5
+          nvlx --version | grep 1.6.3.6
           nvlx-operator --help | grep 'live GPUFleet Kubernetes operator'
           python - <<'PY'
-          from nvlx.nvidia_checkpoint_v1635 import encode_checkpoint, decode_checkpoint
+          from nvlx.nvidia_checkpoint_v1636 import encode_checkpoint, decode_checkpoint
           from nvlx.nvidia_continuity_v1632 import SnapshotIdentity
           i=SnapshotIdentity(api_versions=(("nvidia.com","v1"),),available_resources=(("nvidia.com",("clusterpolicies",)),),gpuclusters=(),clusterpolicies=(("cluster-policy","u1","nvidia.com/v1"),),drivers=(),computedomains=(),computedomaincliques=(),gpu_nodes=())
-          raw=encode_checkpoint(i,None,7,3)
-          assert decode_checkpoint(raw)==(i,None,7,3)
+          raw=encode_checkpoint(i,None,7,3,"pod-a")
+          assert decode_checkpoint(raw)==(i,None,7,3,"pod-a")
           assert 'resourceVersion' not in raw
+          assert 'pod-a' in raw
           PY
