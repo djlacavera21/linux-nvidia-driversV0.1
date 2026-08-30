@@ -29,23 +29,28 @@ jobs:
         run: python -m unittest discover -s tests -v
       - name: Reproducible archive smoke test
         run: |
-          python scripts/repro_release.py 1.6.2.6 --out /tmp/repro-a
-          python scripts/repro_release.py 1.6.2.6 --out /tmp/repro-b
+          python scripts/repro_release.py 1.6.2.7 --out /tmp/repro-a
+          python scripts/repro_release.py 1.6.2.7 --out /tmp/repro-b
           cmp /tmp/repro-a/SHA256SUMS /tmp/repro-b/SHA256SUMS
       - name: CLI smoke test
         run: |
-          nvlx --version | grep 1.6.2.6
+          nvlx --version | grep 1.6.2.7
           nvlx-operator --help | grep 'live GPUFleet Kubernetes operator'
           nvlx-operator --help | grep -- '--token-file'
           nvlx-operator --help | grep -- '--watch-timeout-seconds'
           python - <<'PY'
-          from nvlx.k8s_api_v16 import ApiResponse
-          from nvlx.runtime_v1626 import Runtime
-          expected={'name':'prod','uid':'u1','generation':4}
-          reordered=ApiResponse(200,{'metadata':{'name':'prod','uid':'u1','generation':4,'resourceVersion':'11','finalizers':['other/two','other/one']}})
-          duplicate=ApiResponse(200,{'metadata':{'name':'prod','uid':'u1','generation':4,'resourceVersion':'11','finalizers':['other/one','other/one','other/two']}})
-          injected=ApiResponse(200,{'metadata':{'name':'prod','uid':'u1','generation':4,'resourceVersion':'11','finalizers':['other/one','other/two','other/three']}})
-          assert Runtime._finalizer_response_verified_for_meta(reordered,expected,['other/one','other/two'])
-          assert not Runtime._finalizer_response_verified_for_meta(duplicate,expected,['other/one','other/two'])
-          assert not Runtime._finalizer_response_verified_for_meta(injected,expected,['other/one','other/two'])
+          from unittest.mock import patch
+          from nvlx.runtime_v1626 import Runtime as RuntimeV1626
+          from nvlx.runtime_v1627 import Runtime
+
+          obj={'metadata':{'name':'prod','uid':'u1','generation':4,'resourceVersion':'10','annotations':{}}}
+          r=Runtime(object(),'pod-a',leader_check=lambda:True)
+          with patch.object(RuntimeV1626,'reconcile_object',return_value='standby'):
+              assert r._watch_event_disposition(obj,'MODIFIED') == 'reconcile'
+              assert r.reconcile_object(obj,event_type='MODIFIED') == 'standby'
+          assert 'u1' not in r._watch_seen
+          with patch.object(RuntimeV1626,'reconcile_object',return_value='patched'):
+              assert r._watch_event_disposition(obj,'MODIFIED') == 'reconcile'
+              assert r.reconcile_object(obj,event_type='MODIFIED') == 'patched'
+          assert r._watch_event_disposition(obj,'MODIFIED') == 'duplicate'
           PY
