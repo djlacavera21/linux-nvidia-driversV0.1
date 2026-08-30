@@ -20,7 +20,7 @@ nvlx-k8s = "nvlx.k8s_cli:main"
 nvlx-operator = "nvlx.operator_cli_v16:main"
 
 [tool.setuptools]
-package-dir = "src"
+package-dir = {"" = "src"}
 
 [tool.setuptools.packages.find]
 where = ["src"]
