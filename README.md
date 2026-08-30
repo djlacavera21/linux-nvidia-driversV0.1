@@ -1,26 +1,23 @@
-# nvlx: Linux-NVIDIA-Driver v1.6.6.6.6.6.6.6.2
+# nvlx: Linux-NVIDIA-Driver v1.6.6.6.6.6.6.6.3
 
-`nvlx` v1.6.6.6.6.6.6.6.2 adds strict request-header field-value octet containment to the live HTTP surface. After the existing body-framing, request-version, Host, canonical request-target, obsolete-folding, and field-name gates succeed, each physical field value is now restricted to horizontal tab, space, and visible ASCII. Embedded controls, DEL, and raw non-ASCII octets terminate through the canonical `400 Request Rejected` path before endpoint or runtime evaluation.
+`nvlx` v1.6.6.6.6.6.6.6.3 adds request `Expect` containment to the live HTTP surface. After the existing body-framing, request-version, Host, canonical request-target, obsolete-folding, field-name, and field-value gates succeed, any `Expect` field is rejected with terminal `417 Request Rejected` framing. The live endpoints are deliberately bodyless and do not negotiate `100-continue` or extension expectations.
 
 > [!IMPORTANT]
 > NVIDIA driver/GPU Operator resources remain read-only. The operator still mutates only nvlx-owned GPUFleet status/finalizers plus its existing Lease and Events.
 
-## v1.6.6.6.6.6.6.6.2 request-header field-value containment
+## v1.6.6.6.6.6.6.6.3 Expect containment
 
-- **Field values use a strict ASCII serving profile.** Empty values, SP, HTAB, and visible ASCII bytes `0x21-0x7e` remain admitted.
-- **Embedded controls are rejected.** NUL and other C0 controls are not accepted inside a field value; HTAB remains the sole admitted control byte.
-- **DEL is rejected.** Byte `0x7f` cannot enter parsed request metadata.
-- **Raw non-ASCII values are rejected.** Bytes `0x80-0xff` are intentionally outside this minimal health-server profile, even though broader HTTP deployments can carry legacy opaque octets.
-- **Ordinary punctuation and additional colons remain compatible.** A value such as `alpha:beta` is unchanged by this release.
-- **Empty values remain compatible.** A syntactically valid field such as `X-Empty:` is admitted.
-- **Field-name and obs-fold gates retain ownership.** Malformed physical field names and SP/HTAB-prefixed continuation lines continue to fail through their earlier inherited containment layers.
-- **HTTP/1.0 and HTTP/1.1 are covered.** Value-octet syntax is enforced consistently after exact request-version admission.
+- **No request expectations are admitted.** Any `Expect` field is rejected, including `100-continue`, empty values, duplicates, and extension tokens.
+- **417 is used for expectation rejection.** Otherwise-valid request syntax is distinguished from malformed request metadata while keeping the response non-reflective.
+- **No interim 100 response is emitted.** The bodyless live surface never enters request-body expectation negotiation.
+- **HTTP/1.0 and HTTP/1.1 are covered.** The same no-expectation contract applies after exact request-version admission.
+- **Earlier framing gates retain precedence.** Invalid `Transfer-Encoding` or `Content-Length` still fails through the inherited canonical 400 path before expectation evaluation.
 - **HEAD rejection remains bodyless.** Representation `Content-Length` is preserved without emitting the rejection body.
-- **Field-value rejection is terminal.** `Connection: close` prevents trailing bytes from becoming a second pipelined request.
-- **Runtime/endpoint evaluation remains isolated.** Unsafe generic field values cannot invoke readiness or metrics diagnosis.
+- **Expectation rejection is terminal.** `Connection: close` prevents trailing bytes from becoming a second pipelined request.
+- **Runtime/endpoint evaluation remains isolated.** Rejected expectations cannot invoke readiness or metrics diagnosis.
 - **Admission capacity recovers normally.** Rejection releases its bounded worker slot.
 - **Existing ingress defenses remain intact.** The 8 KiB request-line budget, 32 KiB aggregate header budget, 32-field header cap, 5-second idle timeout, 5-second absolute header deadline, and 32-request admission cap are unchanged.
-- **The live operator now uses `http_v166666662`.** The live runtime remains `runtime_v1664`.
+- **The live operator now uses `http_v166666663`.** The live runtime remains `runtime_v1664`.
 - **Checkpoint persistence, Prometheus schema, RBAC, readiness policy, and NVIDIA mutation behavior are unchanged.**
 
 ## Ingress resource model
@@ -34,7 +31,7 @@ The live server retains six independent quantitative ingress bounds:
 5. `max_request_header_bytes` — aggregate request-header byte budget, default 32768 bytes.
 6. `max_request_header_fields` — request-header field-count budget, default 32 fields.
 
-The quantitative budgets remain independent. Protocol invariants are enforced in a fail-closed chain: bodyless framing, exact HTTP/1.0 or HTTP/1.1 request version, HTTP/1.1 singleton Host framing, canonical origin-form request-target containment, obsolete folded-header rejection, strict request-header field-name grammar, then strict request-header field-value octets.
+The quantitative budgets remain independent. Protocol invariants are enforced in a fail-closed chain: bodyless framing, exact HTTP/1.0 or HTTP/1.1 request version, HTTP/1.1 singleton Host framing, canonical origin-form request-target containment, obsolete folded-header rejection, strict request-header field-name grammar, strict request-header field-value octets, then request-expectation rejection.
 
 ## Safety invariants
 
@@ -46,7 +43,7 @@ The quantitative budgets remain independent. Protocol invariants are enforced in
 6. Any raw request-header continuation line beginning with SP or HTAB is rejected by the inherited obs-fold gate.
 7. Every physical header-field start must have a non-empty ASCII token-style name immediately followed by `:`.
 8. Every physical field value is limited to HTAB, SP, and visible ASCII; C0 controls other than HTAB, DEL, and raw non-ASCII octets are rejected.
-9. Malformed request metadata rejection uses canonical terminal `400 Request Rejected` framing with `Connection: close`.
+9. Any `Expect` field is rejected with terminal 417 framing; the server emits no `100 Continue` response.
 10. HEAD rejection remains bodyless while preserving representation `Content-Length`.
 11. Rejected requests cannot process trailing pipelined bytes on the same connection.
 12. Rejection releases bounded worker capacity.
@@ -54,4 +51,4 @@ The quantitative budgets remain independent. Protocol invariants are enforced in
 14. Silent and byte-trickle partial requests remain bounded by the inherited idle timeout and absolute parse deadline.
 15. Existing client-abort, parser-error, logging, response-body, resource, and method containment remains unchanged.
 16. All v1.6.5.x checkpoint receipt, reconciliation, and persistence semantics remain unchanged.
-17. NVIDIA driver/GPU Operator resources remain read-only in v1.6.6.6.6.6.6.6.2.
+17. NVIDIA driver/GPU Operator resources remain read-only in v1.6.6.6.6.6.6.6.3.
