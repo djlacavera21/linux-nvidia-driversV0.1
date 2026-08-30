@@ -18,6 +18,11 @@ class HealthServer(HealthServerV166661):
             def _send_parser_error_and_close(self, code: int) -> None:
                 payload = _REQUEST_REJECTION_BODY.encode("utf-8")
                 self.close_connection = True
+
+                # Python 3.11/3.12 can leave parser failures at HTTP/0.9,
+                # which suppresses the status line and headers in send_response().
+                # Normalize response framing only; the rejected request is terminal.
+                self.request_version = "HTTP/1.0"
                 self.send_response(code)
                 self.send_header("Content-Type", "text/plain; charset=utf-8")
                 self.send_header("Cache-Control", "no-store")

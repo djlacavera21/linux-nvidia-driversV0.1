@@ -7,9 +7,10 @@
 
 ## v1.6.6.6.6.2 terminal parser-error containment
 
-- **Parser errors never reflect request details.** Framework messages such as bad request syntax, oversized URI/request-line descriptions, header parser diagnostics, and HTTP-version text are not returned to clients.
+- **Parser errors never reflect request details.** Framework messages such as bad request syntax, oversized request-line descriptions, header parser diagnostics, and HTTP-version text are not returned to clients.
 - **Covered parser statuses are explicit.** Inherited parser-generated `400`, `414`, `431`, and `505` responses are rewritten to the fixed `request rejected\n` representation.
 - **Parser errors are connection-terminal.** Every contained parser error sets `Connection: close` and handler `close_connection=True`.
+- **Parser response framing is cross-version deterministic.** Python 3.11/3.12 parser failures that would otherwise remain in HTTP/0.9 response mode are normalized to HTTP/1.0 response framing before the terminal error is emitted.
 - **Following pipelined requests cannot survive a parse failure.** Once parsing fails, no later request is eligible to run on the same socket.
 - **Framing remains byte-accurate.** Parser-error responses use `text/plain; charset=utf-8`, `Cache-Control: no-store`, exact `Content-Length`, and stable `Server: nvlx`.
 - **Existing live request guards remain authoritative.** Canonical `Content-Length: 0`, `Transfer-Encoding` rejection, bodyless GET/HEAD rules, and the v1.6.6.6.6.1 framing contract are unchanged.
@@ -30,16 +31,17 @@ For framework parser failures with status `400`, `414`, `431`, or `505`, the liv
 - `Connection: close`;
 - stable `Server: nvlx`.
 
-The parser-supplied message and explanation arguments are ignored. This is a transport-containment change only; accepted request parsing and all endpoint logic remain unchanged.
+The parser-supplied message and explanation arguments are ignored. Parser-error response framing is normalized to the server's HTTP/1.0 wire baseline before emission so supported Python versions expose the same status/header/body contract. This is a transport-containment change only; accepted request parsing and all endpoint logic remain unchanged.
 
 ## Safety invariants
 
 1. Parser-generated `400/414/431/505` responses are fixed-body and non-reflective.
 2. Parser failures are always terminal for the current connection.
-3. A malformed request cannot be followed by a processed pipelined request on the same socket.
-4. v1.6.6.6.6.1 canonical zero-length framing remains unchanged.
-5. v1.6.6.6.5 terminal unsupported-method transport remains unchanged.
-6. Unified GET/HEAD dispatch, readiness `200/503`, metrics success/`500`, and HEAD parity remain unchanged.
-7. Typed-provider symmetry and all v1.6.6.x diagnosis validation remain unchanged.
-8. All v1.6.5.x checkpoint receipt, reconciliation, and persistence semantics remain unchanged.
-9. NVIDIA driver/GPU Operator resources remain read-only in v1.6.6.6.6.2.
+3. Parser-error status and headers are emitted consistently on Python 3.11, 3.12, and 3.13.
+4. A malformed request cannot be followed by a processed pipelined request on the same socket.
+5. v1.6.6.6.6.1 canonical zero-length framing remains unchanged.
+6. v1.6.6.6.5 terminal unsupported-method transport remains unchanged.
+7. Unified GET/HEAD dispatch, readiness `200/503`, metrics success/`500`, and HEAD parity remain unchanged.
+8. Typed-provider symmetry and all v1.6.6.x diagnosis validation remain unchanged.
+9. All v1.6.5.x checkpoint receipt, reconciliation, and persistence semantics remain unchanged.
+10. NVIDIA driver/GPU Operator resources remain read-only in v1.6.6.6.6.2.
