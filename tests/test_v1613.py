@@ -11,7 +11,8 @@ class ConflictClient:
         self.patches += 1
         if self.patches == 1:
             raise ApiError(409,"conflict")
-        return ApiResponse(200,{"metadata":{"name":name,"uid":"u1","generation":4,"resourceVersion":"12"},"status":status})
+        generation=int(self.fresh_meta.get("generation",4) or 0)
+        return ApiResponse(200,{"metadata":{"name":name,"uid":"u1","generation":generation,"resourceVersion":"12"},"status":status})
     def get_fleet(self,name):
         self.gets += 1
         return ApiResponse(200,{"metadata":self.fresh_meta})
@@ -27,11 +28,12 @@ class V1613Tests(unittest.TestCase):
         self.assertEqual(client.patches,2)
         self.assertEqual(client.gets,1)
 
-    def test_conflict_refetch_generation_change_blocks_old_plan_retry(self):
+    def test_conflict_refetch_new_generation_recomputes_before_retry(self):
         client=ConflictClient({"name":"prod","uid":"u1","resourceVersion":"11","generation":5})
         runtime=Runtime(client,"pod-a",leader_check=lambda:True)
-        self.assertFalse(runtime._patch_status(self.obj(),{"phase":"Ready"}))
-        self.assertEqual(client.patches,1)
+        self.assertTrue(runtime._patch_status(self.obj(),{"phase":"Ready"}))
+        self.assertEqual(client.patches,2)
+        self.assertEqual(runtime.stats.status_conflict_recomputes,1)
 
     def test_conflict_refetch_uid_change_blocks_old_plan_retry(self):
         client=ConflictClient({"name":"prod","uid":"replacement","resourceVersion":"11","generation":4})
