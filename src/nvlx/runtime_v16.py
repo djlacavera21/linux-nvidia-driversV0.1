@@ -64,8 +64,19 @@ class Runtime:
         return meta
 
     @classmethod
-    def _status_response_verified(cls, response: ApiResponse | None, expected_name: str, expected_status: dict) -> bool:
-        if cls._response_meta(response,expected_name) is None or not isinstance(response.body,dict): return False
+    def _status_response_verified(cls, response: ApiResponse | None, expected_meta: dict, expected_status: dict) -> bool:
+        expected_name=expected_meta.get("name","")
+        meta=cls._response_meta(response,expected_name)
+        if meta is None or not isinstance(response.body,dict): return False
+        expected_uid=expected_meta.get("uid")
+        if expected_uid:
+            returned_uid=meta.get("uid")
+            if returned_uid is not None and returned_uid != expected_uid: return False
+        expected_generation=expected_meta.get("generation")
+        if expected_generation is not None and "generation" in meta:
+            try:
+                if int(meta.get("generation")) != int(expected_generation): return False
+            except (TypeError,ValueError): return False
         returned=response.body.get("status")
         if not isinstance(returned,dict): return False
         for key,value in expected_status.items():
@@ -73,12 +84,13 @@ class Runtime:
         return True
 
     @classmethod
-    def _finalizer_response_verified(cls, response: ApiResponse | None, expected_name: str) -> bool:
+    def _finalizer_response_verified(cls, response: ApiResponse | None, expected_name: str, expected_finalizers: list[str]) -> bool:
         meta=cls._response_meta(response,expected_name)
         if meta is None: return False
         finalizers=meta.get("finalizers")
         if not isinstance(finalizers,list) or not all(isinstance(x,str) for x in finalizers): return False
-        return PROTECTIVE_FINALIZER not in finalizers
+        if PROTECTIVE_FINALIZER in finalizers: return False
+        return finalizers == expected_finalizers
 
     @staticmethod
     def _conflict_refetch_matches(fresh: object, original_meta: dict) -> tuple[bool,str]:
@@ -116,7 +128,7 @@ class Runtime:
             if not self._leader(): return False
             try:
                 response=self.client.patch_status(name,rv,status)
-                return self._status_response_verified(response,name,status)
+                return self._status_response_verified(response,meta,status)
             except ApiError as e:
                 if e.status not in {409,412}: raise
                 if not self._leader(): return False
@@ -137,7 +149,7 @@ class Runtime:
         remaining=[x for x in finalizers if x != PROTECTIVE_FINALIZER]
         try:
             response=self.client.patch_finalizers(meta.get("name",""),meta.get("resourceVersion",""),remaining)
-            return self._finalizer_response_verified(response,meta.get("name",""))
+            return self._finalizer_response_verified(response,meta.get("name",""),remaining)
         except ApiError as e:
             if e.status in {409,412,404,410}: return False
             raise
