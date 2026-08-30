@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 import signal, threading
-from .k8s_api_v16 import KubeClient, ApiError
+from .k8s_api_v16 import KubeClient, ApiError, ApiResponse
 from .operator_v15 import plan as operator_plan
 from .finalizer import decide as finalizer_decide
 from .runtime_guard_v161 import classify_watch_line, reconnect_delay
@@ -43,8 +43,7 @@ class Runtime:
         if self.stats.terminating:
             self.stats.leader=False; return False
         try: ok=bool(self.leader_check())
-        except Exception:
-            ok=False
+        except Exception: ok=False
         self.stats.leader=ok
         return ok
 
@@ -52,28 +51,44 @@ class Runtime:
     def _status_from_plan(plan: dict) -> dict:
         return {k:v for k,v in plan.items() if k in {"phase","observed_generation","canary_wave","conditions"}}
 
+    @staticmethod
+    def _response_meta(response: ApiResponse | None, expected_name: str="") -> dict | None:
+        if response is None or not isinstance(response.body,dict): return None
+        meta=response.body.get("metadata")
+        if not isinstance(meta,dict): return None
+        rv=meta.get("resourceVersion")
+        if not isinstance(rv,str) or not rv.strip(): return None
+        if expected_name:
+            name=meta.get("name")
+            if name is not None and name != expected_name: return None
+        return meta
+
     def _event(self, obj: dict, reason: str, note: str) -> bool:
         meta=obj.get("metadata",{}); name=meta.get("name",""); uid=meta.get("uid","")
-        if not name or not uid or self.stats.terminating: return False
-        if not self._leader(): return False
+        if not name or not uid or self.stats.terminating or not self._leader(): return False
         now=datetime.now(timezone.utc).isoformat().replace("+00:00","Z")
         event={"apiVersion":"events.k8s.io/v1","kind":"Event","metadata":{"generateName":f"nvlx-{name}-","namespace":self.namespace},"eventTime":now,"reportingController":"nvlx.io/operator","reportingInstance":self.identity,"action":"Reconcile","reason":reason,"note":note[:1024],"type":"Normal","regarding":{"apiVersion":"nvlx.io/v1alpha1","kind":"GPUFleet","name":name,"uid":uid}}
         try:
-            self.client.create_event(self.namespace,event); return True
-        except ApiError:
-            return False
+            response=self.client.create_event(self.namespace,event)
+            return self._response_meta(response) is not None
+        except ApiError: return False
 
     def _patch_status(self, obj: dict, status: dict) -> bool:
         meta=obj.get("metadata",{}); name=meta.get("name",""); rv=meta.get("resourceVersion","")
         for _ in range(2):
             if not self._leader(): return False
             try:
-                self.client.patch_status(name,rv,status); return True
+                response=self.client.patch_status(name,rv,status)
+                return self._response_meta(response,name) is not None
             except ApiError as e:
                 if e.status not in {409,412}: raise
                 if not self._leader(): return False
-                fresh=self.client.get_fleet(name).body or {}; rv=fresh.get("metadata",{}).get("resourceVersion","")
-                if not rv: return False
+                fresh=self.client.get_fleet(name).body
+                if not isinstance(fresh,dict): return False
+                fresh_meta=fresh.get("metadata")
+                if not isinstance(fresh_meta,dict): return False
+                rv=fresh_meta.get("resourceVersion","")
+                if not isinstance(rv,str) or not rv: return False
         return False
 
     def _finalize(self, obj: dict) -> bool:
@@ -86,7 +101,8 @@ class Runtime:
         if not decision.remove_finalizer or not self._leader(): return False
         remaining=[x for x in finalizers if x != PROTECTIVE_FINALIZER]
         try:
-            self.client.patch_finalizers(meta.get("name",""),meta.get("resourceVersion",""),remaining); return True
+            response=self.client.patch_finalizers(meta.get("name",""),meta.get("resourceVersion",""),remaining)
+            return self._response_meta(response,meta.get("name","")) is not None
         except ApiError as e:
             if e.status in {409,412,404,410}: return False
             raise
@@ -94,16 +110,19 @@ class Runtime:
     def reconcile_object(self, obj: dict, *, event_type: str="MODIFIED") -> str:
         self.stats.reconcile_total += 1
         if not isinstance(obj,dict): self.stats.reconcile_failures += 1; return "invalid"
-        meta=obj.get("metadata") or {}; name=meta.get("name",""); rv=str(meta.get("resourceVersion","") or "")
+        meta=obj.get("metadata")
+        if not isinstance(meta,dict): self.stats.reconcile_failures += 1; return "invalid"
+        name=meta.get("name",""); rv=meta.get("resourceVersion","")
+        if not isinstance(name,str) or not name or not isinstance(rv,str) or not rv: self.stats.reconcile_failures += 1; return "invalid"
         try: generation=int(meta.get("generation",0) or 0)
         except (TypeError,ValueError): self.stats.reconcile_failures += 1; return "invalid"
-        if not name or not rv or generation < 0: self.stats.reconcile_failures += 1; return "invalid"
+        if generation < 0: self.stats.reconcile_failures += 1; return "invalid"
         self.stats.last_resource_version=rv
         if meta.get("deletionTimestamp"):
             return "finalized" if self._finalize(obj) else "finalizer-hold"
         if not self._leader(): return "standby"
         annotations=meta.get("annotations") or {}
-        allowed=annotations.get("nvlx.io/approved")=="true"
+        allowed=isinstance(annotations,dict) and annotations.get("nvlx.io/approved")=="true"
         p=operator_plan(name,event_type=event_type,resource_version=rv,generation=generation,allowed=allowed,runtime_action="execute" if allowed else "hold",mutation_fence_ok=True)
         if p.action=="patch-status" and p.reconcile:
             status=self._status_from_plan(p.reconcile)
@@ -115,8 +134,12 @@ class Runtime:
 
     def list_and_watch_once(self) -> str:
         listing=self.client.list_fleets(); self.stats.api_reachable=True
-        body=listing.body if isinstance(listing.body,dict) else {}; rv=str(body.get("metadata",{}).get("resourceVersion","") or "")
-        if not rv: raise RuntimeError("GPUFleet list did not return resourceVersion")
+        body=listing.body
+        if not isinstance(body,dict): raise RuntimeError("GPUFleet list body must be an object")
+        metadata=body.get("metadata")
+        if not isinstance(metadata,dict): raise RuntimeError("GPUFleet list metadata must be an object")
+        rv=metadata.get("resourceVersion","")
+        if not isinstance(rv,str) or not rv: raise RuntimeError("GPUFleet list did not return resourceVersion")
         items=body.get("items",[])
         if not isinstance(items,list): raise RuntimeError("GPUFleet list items must be a list")
         for item in items:
@@ -132,7 +155,10 @@ class Runtime:
                 obj=event.get("object") or {}
                 if decision.action=="bookmark":
                     if isinstance(obj,dict):
-                        self.stats.last_resource_version=str(obj.get("metadata",{}).get("resourceVersion",self.stats.last_resource_version))
+                        bookmark_meta=obj.get("metadata")
+                        if isinstance(bookmark_meta,dict):
+                            bookmark_rv=bookmark_meta.get("resourceVersion")
+                            if isinstance(bookmark_rv,str) and bookmark_rv: self.stats.last_resource_version=bookmark_rv
                     continue
                 self.reconcile_object(obj,event_type=decision.action.upper())
             return "eof"
