@@ -6,8 +6,8 @@ from .k8s_api_v16 import KubeClient
 from .lease_v16 import LeaseElector
 from .nvidia_checkpoint_v1651 import LeaseCheckpointStore
 from .nvidia_inventory_v1631 import NvidiaInventory
-from .runtime_v1663 import Runtime
-from .http_v16 import HealthServer
+from .runtime_v1664 import Runtime
+from .http_v1664 import HealthServer
 
 def _read_token_file(path: str) -> str:
     token=Path(path).read_text(encoding="utf-8").strip()
