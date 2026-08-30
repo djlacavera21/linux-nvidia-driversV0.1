@@ -1,49 +1,48 @@
-# nvlx: Linux-NVIDIA-Driver v1.6.6.6
+# nvlx: Linux-NVIDIA-Driver v1.6.6.6.1
 
-`nvlx` v1.6.6.6 closes the reciprocal partial typed-provider gap between readiness and Prometheus diagnostics. A runtime that exposes `metrics_diagnosis()` but no dedicated `readiness_diagnosis()` now supplies `/readyz` from the strict typed readiness nested inside its metrics diagnosis instead of falling back to raw `ready()`/stats/private readiness state.
+`nvlx` v1.6.6.6.1 adds HTTP `HEAD` parity for the live observability surface while preserving the v1.6.6.6 typed-provider symmetry and all existing runtime/checkpoint safety contracts.
 
 > [!IMPORTANT]
 > NVIDIA driver/GPU Operator resources remain read-only. The operator still mutates only nvlx-owned GPUFleet status/finalizers plus its existing Lease and Events.
 
-## v1.6.6.6 metrics-owned readiness propagation
+## v1.6.6.6.1 HEAD parity
 
-- **Metrics-only typed providers now drive `/readyz`.** When `readiness_diagnosis()` is absent but `metrics_diagnosis()` exists, the live HTTP adapter exposes `metrics_diagnosis().readiness` through the established strict readiness boundary.
-- **Dedicated readiness remains preferred.** Runtimes that expose both diagnosis methods continue to use `readiness_diagnosis()` for `/readyz`; the metrics provider is not called for that endpoint.
-- **Malformed metrics-owned readiness fails closed.** Invalid or contradictory nested readiness produces the existing `503 not ready` response and never falls back to raw runtime state.
-- **Endpoint isolation is preserved.** `/readyz` validates only the nested readiness object. Invalid unrelated metric fields can still make `/metrics` return `500 metrics unavailable` without suppressing a valid readiness result.
-- **The full typed metrics path remains frozen.** `/metrics` continues to prefer `metrics_diagnosis()` and validates the existing strict metric type/value domains.
-- **Readiness-only providers keep v1.6.6.5 behavior.** Their typed readiness continues to propagate into the legacy metric-value path.
-- **Purely legacy runtimes remain unchanged.** Runtimes with neither diagnosis method continue through the historical readiness and metric fallbacks.
-- **The live operator now uses `http_v1666`.** The live runtime remains `runtime_v1664`; no runtime policy or persistence layer changes are required.
-- **HTTP transport contracts are unchanged.** `Server: nvlx`, no-store caching, exact UTF-8 framing, deterministic framework-error handling and exporter fault containment remain intact.
-- **Checkpoint semantics are unchanged.** Receipt proof, canonical digest validation, ambiguity recovery, reconciliation accounting, rollback fencing, replay floors and Lease-epoch behavior are untouched.
-- **No RBAC expansion.** This release changes the versioned HTTP adapter, operator wiring, tests, package metadata, CI and documentation only.
+- **`HEAD /livez` now mirrors `GET /livez`.** It returns the same `200`, content type, `Cache-Control: no-store`, `Server: nvlx`, and representation `Content-Length`, but never emits the `ok\n` body.
+- **`HEAD /readyz` now mirrors readiness GET semantics.** Ready `200` and not-ready `503` statuses, headers, and representation lengths match GET while the response body remains empty.
+- **`HEAD /metrics` evaluates the same frozen metrics path.** Successful responses preserve Prometheus text-format metadata and the GET representation length without returning exposition bytes.
+- **Metrics failure containment is preserved for HEAD.** Capture/render failures return the same deterministic `500` metadata and `Content-Length` for `metrics unavailable\n`, with no body and no exception leakage.
+- **Unknown HEAD paths mirror GET's empty `404`.** They remain outside the live-state no-store/content-length helper contract.
+- **Historical GET behavior is unchanged.** The new behavior is layered in `http_v16661`; prior HTTP modules remain immutable.
+- **Typed-provider symmetry is unchanged.** Metrics-only providers still supply readiness through `metrics_diagnosis().readiness` when no dedicated readiness provider exists, and dedicated readiness remains preferred when both are present.
+- **The live operator now uses `http_v16661`.** The live runtime remains `runtime_v1664`.
+- **Checkpoint semantics are unchanged.** Receipt proof, canonical digest validation, ambiguity recovery, reconciliation accounting, rollback fencing, replay floors, and Lease-epoch behavior are untouched.
+- **No RBAC expansion.** No new Kubernetes mutation path is introduced.
 
-## Partial typed-provider symmetry
+## HEAD contract
 
-After v1.6.6.6 the HTTP layer treats either typed diagnosis surface as authoritative for the readiness object it exposes:
+For `/livez`, `/readyz`, and `/metrics`, HEAD returns the same representation metadata that GET would return for the same state:
 
-`readiness_diagnosis() -> /readyz and readiness portion of legacy /metrics`
+- identical HTTP status;
+- identical `Content-Type`;
+- identical `Cache-Control`;
+- identical stable `Server: nvlx` token;
+- `Content-Length` equal to the corresponding GET payload byte length;
+- zero response-body bytes.
 
-`metrics_diagnosis().readiness -> /readyz when no dedicated readiness provider exists`
-
-A dedicated readiness provider always wins when both methods exist.
-
-The readiness endpoint intentionally does not validate unrelated metric counters. This keeps health-serving state independent from exporter-only field failures while retaining strict typed readiness validation.
+The metrics endpoint still performs capture/render validation for HEAD so a failed exporter cannot be presented as a successful representation.
 
 ## Safety invariants
 
-1. Dedicated `readiness_diagnosis()` remains the preferred `/readyz` source.
-2. A metrics-only typed provider supplies `/readyz` from `metrics_diagnosis().readiness` and is never silently replaced with raw readiness state.
-3. Malformed metrics-owned readiness fails closed to `503 not ready`.
-4. `/readyz` does not reject valid readiness solely because unrelated typed metric fields are malformed.
-5. Full `metrics_diagnosis()` remains the preferred frozen Prometheus source.
-6. Readiness-only typed providers retain v1.6.6.5 metrics propagation behavior.
-7. Purely legacy runtimes retain the established compatibility path.
-8. v1.6.6.4 effective-leadership validation remains active on typed readiness.
+1. HEAD never writes a live-state response body.
+2. HEAD status and representation headers match GET for successful and failed live-state endpoints.
+3. Prometheus HEAD responses preserve `text/plain; version=0.0.4; charset=utf-8`.
+4. Metrics HEAD failures remain deterministic and non-cacheable.
+5. Unknown HEAD paths use the existing empty `404` contract.
+6. v1.6.6.6 partial typed-provider symmetry remains unchanged.
+7. v1.6.6.5 typed readiness propagation into metrics fallback remains unchanged.
+8. v1.6.6.4 effective-leadership validation remains active.
 9. v1.6.6.3 logical readiness validation remains unchanged.
-10. v1.6.6.2 typed metric nonnegative and relational invariants remain unchanged.
-11. v1.6.6.1 strict diagnosis type validation remains unchanged.
-12. All v1.6.5.x checkpoint receipt, reconciliation and persistence semantics remain unchanged.
-13. No new Kubernetes mutation path or RBAC permission is introduced.
-14. NVIDIA driver/GPU Operator resources remain read-only in v1.6.6.6.
+10. v1.6.6.2 typed metric value-domain validation remains unchanged.
+11. v1.6.6.1 strict diagnosis typing remains unchanged.
+12. All v1.6.5.x checkpoint receipt, reconciliation, and persistence semantics remain unchanged.
+13. NVIDIA driver/GPU Operator resources remain read-only in v1.6.6.6.1.
