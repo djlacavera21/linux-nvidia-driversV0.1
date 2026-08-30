@@ -29,21 +29,23 @@ jobs:
         run: python -m unittest discover -s tests -v
       - name: Reproducible archive smoke test
         run: |
-          python scripts/repro_release.py 1.6.2.5 --out /tmp/repro-a
-          python scripts/repro_release.py 1.6.2.5 --out /tmp/repro-b
+          python scripts/repro_release.py 1.6.2.6 --out /tmp/repro-a
+          python scripts/repro_release.py 1.6.2.6 --out /tmp/repro-b
           cmp /tmp/repro-a/SHA256SUMS /tmp/repro-b/SHA256SUMS
       - name: CLI smoke test
         run: |
-          nvlx --version | grep 1.6.2.5
+          nvlx --version | grep 1.6.2.6
           nvlx-operator --help | grep 'live GPUFleet Kubernetes operator'
           nvlx-operator --help | grep -- '--token-file'
           nvlx-operator --help | grep -- '--watch-timeout-seconds'
           python - <<'PY'
           from nvlx.k8s_api_v16 import ApiResponse
-          from nvlx.runtime_v1625 import Runtime
+          from nvlx.runtime_v1626 import Runtime
           expected={'name':'prod','uid':'u1','generation':4}
-          missing=ApiResponse(200,{'metadata':{'name':'prod','uid':'u1','resourceVersion':'11'},'status':{'phase':'Ready'}})
-          good=ApiResponse(200,{'metadata':{'name':'prod','uid':'u1','generation':4,'resourceVersion':'11'},'status':{'phase':'Ready'}})
-          assert not Runtime._status_response_verified(missing,expected,{'phase':'Ready'})
-          assert Runtime._status_response_verified(good,expected,{'phase':'Ready'})
+          reordered=ApiResponse(200,{'metadata':{'name':'prod','uid':'u1','generation':4,'resourceVersion':'11','finalizers':['other/two','other/one']}})
+          duplicate=ApiResponse(200,{'metadata':{'name':'prod','uid':'u1','generation':4,'resourceVersion':'11','finalizers':['other/one','other/one','other/two']}})
+          injected=ApiResponse(200,{'metadata':{'name':'prod','uid':'u1','generation':4,'resourceVersion':'11','finalizers':['other/one','other/two','other/three']}})
+          assert Runtime._finalizer_response_verified_for_meta(reordered,expected,['other/one','other/two'])
+          assert not Runtime._finalizer_response_verified_for_meta(duplicate,expected,['other/one','other/two'])
+          assert not Runtime._finalizer_response_verified_for_meta(injected,expected,['other/one','other/two'])
           PY

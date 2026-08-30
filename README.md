@@ -1,29 +1,32 @@
-# nvlx: Linux-NVIDIA-Driver v1.6.2.5
+# nvlx: Linux-NVIDIA-Driver v1.6.2.6
 
-`nvlx` v1.6.2.5 is a narrow post-1.6.2.4 runtime-safety hotfix. It preserves the Kubernetes API surface and NVIDIA read-only boundary while requiring successful GPUFleet mutation responses to prove generation continuity instead of accepting a 2xx response whose object generation is missing or inconsistent.
+`nvlx` v1.6.2.6 is a narrow post-1.6.2.5 correctness hotfix. It preserves the Kubernetes API surface and NVIDIA read-only boundary while changing unrelated-finalizer verification from order-sensitive list equality to duplicate-free semantic preservation.
 
 > [!IMPORTANT]
-> NVIDIA resource changes remain read-only in v1.6.2.5. The operator mutates only nvlx-owned GPUFleet status/finalizers plus its Lease and Events; driver/GPU Operator mutation remains deferred.
+> NVIDIA resource changes remain read-only in v1.6.2.6. The operator mutates only nvlx-owned GPUFleet status/finalizers plus its Lease and Events; driver/GPU Operator mutation remains deferred.
 
-## v1.6.2.5 hotfixes
+## v1.6.2.6 hotfixes
 
-- **Status generation proof.** A successful GPUFleet status PATCH must now return `metadata.generation`, and it must exactly match the generation of the object used to compute the status write.
-- **Missing-generation fail closed.** A 2xx status response with correct name, UID, resourceVersion and status data is still rejected if generation evidence is absent.
-- **Finalizer generation proof.** Successful finalizer PATCH completion is now bound to the exact GPUFleet generation used for that mutation, in addition to existing name, UID and unrelated-finalizer preservation checks.
-- **Conflict retry generation binding.** After a finalizer `409/412`, the runtime may refetch a newer generation of the same UID and recompute the finalizer decision, but the retry only succeeds if the response proves that fresh generation exactly.
-- **Malformed generation rejection.** Missing, negative, boolean, or non-integer generation evidence does not satisfy mutation verification.
-- **Prior watch safeguards retained.** Malformed state-bearing watch deliveries still force trusted relists; inventory and leadership freshness proofs remain fail-closed and independent.
-- **Prior mutation safeguards retained.** Conflict-safe status/finalizer recomputation, UID-bound verification, exact unrelated-finalizer preservation, bounded retries, token-file auth, opaque resourceVersion semantics and verified Lease writes remain active.
+- **Semantic finalizer preservation.** Successful finalizer completion now accepts harmless reordering of unrelated finalizers when the returned set is otherwise identical.
+- **Drop/injection rejection.** Missing or unexpected unrelated finalizers still fail closed.
+- **Duplicate rejection.** Duplicate returned finalizers are rejected, and duplicate source finalizers fail the finalizer plan before mutation is attempted.
+- **Protective-finalizer rejection.** A response that still contains `nvlx.io/fleet-protection` cannot count as successful finalization.
+- **Generation binding retained.** Finalizer responses must still prove the exact GPUFleet generation used for the write, including after `409/412` refetch/recompute.
+- **Identity binding retained.** Name, UID and non-empty resourceVersion remain mandatory for verified mutation completion.
+- **Status safeguards retained.** Status PATCH success still requires exact returned generation and intended controller-owned status fields.
+- **Watch and readiness safeguards retained.** Watch-corruption relists, inventory-continuity invalidation, Lease freshness, leadership invalidation, token-file auth and opaque resourceVersion semantics remain unchanged.
 
 ## Safety invariants
 
-1. Successful status mutation is not trusted without exact returned GPUFleet generation evidence.
-2. Finalizer completion is not trusted without exact returned generation evidence for the object used for that write.
-3. A finalizer conflict retry may follow a newer generation only after a fresh same-UID refetch and recomputation; success is bound to that fresh generation.
-4. Name, UID, resourceVersion and intended status/finalizer verification remain required alongside generation continuity.
-5. Kubernetes `resourceVersion` remains opaque and is never numerically or lexically ordered.
-6. Malformed state-bearing watch content still forces a trusted relist.
-7. Leadership freshness and inventory freshness remain independent readiness requirements.
-8. Conflict retries remain bounded and leadership-fenced.
-9. NVIDIA resources remain read-only in v1.6.2.5.
-10. All v0.1-v1.6.2.4 approval, rollback, Secure Boot, DRA, fabric, health/SLO, PSIRT, quarantine, audit, SBOM, provenance, fencing, replay, UID-integrity, Lease-CAS, leadership-freshness, inventory-continuity and watch-trust safeguards remain in force.
+1. Unrelated finalizers are compared semantically, not by list order.
+2. Both expected and returned finalizer collections must be duplicate-free lists of non-empty strings.
+3. Dropped, injected, duplicated, or still-protective finalizers fail closed.
+4. Duplicate source finalizers prevent a finalizer mutation plan from being issued.
+5. Finalizer completion remains bound to exact name, UID, resourceVersion presence and generation continuity.
+6. Status mutation verification remains generation-bound and status-echo verified.
+7. Kubernetes `resourceVersion` remains opaque and is never numerically or lexically ordered.
+8. Malformed state-bearing watch content still forces a trusted relist.
+9. Leadership freshness and inventory freshness remain independent readiness requirements.
+10. Conflict retries remain bounded and leadership-fenced.
+11. NVIDIA resources remain read-only in v1.6.2.6.
+12. All v0.1-v1.6.2.5 approval, rollback, Secure Boot, DRA, fabric, health/SLO, PSIRT, quarantine, audit, SBOM, provenance, fencing, replay, UID-integrity, Lease-CAS, leadership-freshness, inventory-continuity, watch-trust and generation-verification safeguards remain in force.
