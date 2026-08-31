@@ -1,109 +1,107 @@
-# nvlx: Linux-NVIDIA-Driver v1.6.6.6.6.6.6.6.6.6.3.3.1.2.3.4.5.6.7.5.6.2
+# nvlx: Linux-NVIDIA-Driver v1.6.6.6.6.6.6.6.6.6.3.3.1.2.3.4.5.6.7.5.6.3
 
-`nvlx` v1.6.6.6.6.6.6.6.6.6.3.3.1.2.3.4.5.6.7.5.6.2 adds `X-Envoy-Hedge-On-Per-Try-Timeout` Connection-nomination containment to the live HTTP surface. After the inherited ingress and proxy-metadata gates succeed, the server rejects any exact `x-envoy-hedge-on-per-try-timeout` Connection option before endpoint or runtime evaluation while continuing to admit ordinary `X-Envoy-Hedge-On-Per-Try-Timeout` fields.
+`nvlx` v1.6.6.6.6.6.6.6.6.6.3.3.1.2.3.4.5.6.7.5.6.3 adds `X-Envoy-Retriable-Header-Names` Connection-nomination containment to the live HTTP surface. After inherited ingress and proxy-metadata gates succeed, the server rejects an exact `x-envoy-retriable-header-names` Connection option before endpoint/runtime evaluation while continuing to admit ordinary `X-Envoy-Retriable-Header-Names` fields.
 
 > [!IMPORTANT]
 > NVIDIA driver/GPU Operator resources remain read-only. The operator still mutates only nvlx-owned GPUFleet status/finalizers plus its existing Lease and Events.
 
-## v1.6.6.6.6.6.6.6.6.6.3.3.1.2.3.4.5.6.7.5.6.2 X-Envoy-Hedge-On-Per-Try-Timeout Connection-nomination containment
+## v1.6.6.6.6.6.6.6.6.6.3.3.1.2.3.4.5.6.7.5.6.3 X-Envoy-Retriable-Header-Names Connection-nomination containment
 
-- **X-Envoy-Hedge-On-Per-Try-Timeout remains ordinary request metadata on this surface.** A normal request `X-Envoy-Hedge-On-Per-Try-Timeout` field remains admissible when all inherited gates accept it.
-- **Hop-by-hop demotion is terminal.** An exact `x-envoy-hedge-on-per-try-timeout` Connection option is rejected through canonical `400 Request Rejected` framing.
-- **Matching is case-insensitive.** `Connection: X-Envoy-Hedge-On-Per-Try-Timeout` and mixed-case variants are rejected.
-- **Substring lookalikes remain outside this rule.** Options such as `x-envoy-hedge-on-per-try-timeout-x` remain valid when otherwise admissible.
-- **Values remain opaque at this layer.** Connection-nomination containment examines only Connection option names; Envoy interprets this field as a boolean-style hedging control and ignores invalid values.
-- **HTTP/1.0 and HTTP/1.1 are covered.** Nomination is refused under either admitted request version.
-- **Earlier gates retain precedence.** `Expect`, upgrade/framing/Connection policy, credentials, forwarding/client-IP metadata, `Fastly-Client-IP`, `Fly-Client-IP`, `X-Envoy-External-Address`, `X-Envoy-Original-Dst-Host`, `X-Envoy-Original-Path`, `X-Envoy-Original-Url`, `X-Envoy-Internal`, `X-Envoy-Attempt-Count`, `X-Envoy-Decorator-Operation`, `X-Envoy-Expected-Rq-Timeout-Ms`, `X-Envoy-Upstream-Rq-Timeout-Ms`, `X-Envoy-Upstream-Rq-Per-Try-Timeout-Ms`, `X-Envoy-Retry-On`, `X-Envoy-Retry-Grpc-On`, and `X-Envoy-Max-Retries` nomination all run before this layer.
-- **The canonical Expect contract remains intact.** A request that also carries `Expect` is rejected by the earlier `417 Request Rejected` gate and emits no interim `100 Continue` response.
-- **Rejection uses canonical terminal 400 framing.** The connection closes so trailing bytes cannot become a pipelined follow-on request.
+- **Ordinary retry metadata remains admissible.** `X-Envoy-Retriable-Header-Names` is accepted when all inherited gates accept the request.
+- **Hop-by-hop demotion is terminal.** Exact `x-envoy-retriable-header-names` Connection nomination receives canonical `400 Request Rejected` framing.
+- **Matching is case-insensitive.** Mixed-case exact nominations are rejected.
+- **Substring lookalikes remain outside this rule.** `x-envoy-retriable-header-names-x` remains valid when otherwise admissible.
+- **Values remain opaque at this layer.** This containment examines only Connection option names. Envoy interprets the request field as a comma-separated list of response-header names used with the `retriable-headers` retry policy, and honors it only for internal clients.
+- **HTTP/1.0 and HTTP/1.1 are covered.**
+- **Earlier gates retain precedence.** The complete inherited framing, credential, forwarding/client-address, Envoy timeout, retry, max-retry, and hedge gates run before this layer.
+- **Expect handling remains canonical.** Requests carrying `Expect` still terminate through the inherited `417 Request Rejected` path with no interim `100 Continue`.
 - **HEAD rejection remains bodyless.** Representation `Content-Length` is preserved without sending the rejection body.
-- **Runtime/endpoint evaluation remains isolated.** Nomination cannot invoke readiness or metrics diagnosis.
+- **Pipeline and runtime isolation remain intact.** Rejected requests cannot dispatch trailing pipelined bytes or invoke readiness/metrics evaluation.
 - **Admission capacity recovers normally.** Rejection releases its bounded worker slot.
-- **Existing ingress defenses remain intact.** The 8 KiB request-line budget, 32 KiB aggregate header budget, 32-field header cap, 5-second idle timeout, 5-second absolute header deadline, and 32-request admission cap are unchanged.
-- **The live operator now uses `http_v16666666663311234567562`.** The live runtime remains `runtime_v1664`.
+- **Ingress budgets are unchanged.** 8 KiB request line, 32 KiB aggregate headers, 32 fields, 5-second idle timeout, 5-second absolute header deadline, 32 concurrent requests.
+- **The live operator now uses `http_v16666666663311234567563`.** The live runtime remains `runtime_v1664`.
 - **Checkpoint persistence, Prometheus schema, RBAC, readiness policy, and NVIDIA mutation behavior are unchanged.**
 
 ## Ingress resource model
 
-The live server retains six independent quantitative ingress bounds:
+1. `max_concurrent_requests` — default 32.
+2. `request_timeout_seconds` — default 5 seconds.
+3. `request_header_deadline_seconds` — default 5 seconds.
+4. `max_request_line_bytes` — default 8192 bytes.
+5. `max_request_header_bytes` — default 32768 bytes.
+6. `max_request_header_fields` — default 32 fields.
 
-1. `max_concurrent_requests` — admitted request workers, default 32.
-2. `request_timeout_seconds` — idle timeout between socket reads, default 5 seconds.
-3. `request_header_deadline_seconds` — absolute request-line/header parse deadline, default 5 seconds.
-4. `max_request_line_bytes` — request-line byte budget, default 8192 bytes.
-5. `max_request_header_bytes` — aggregate request-header byte budget, default 32768 bytes.
-6. `max_request_header_fields` — request-header field-count budget, default 32 fields.
-
-The quantitative budgets remain independent. Protocol invariants are enforced in a fail-closed chain: bodyless framing, exact HTTP/1.0 or HTTP/1.1 request version, HTTP/1.1 singleton Host framing, canonical origin-form request-target containment, obsolete folded-header rejection, strict request-header field-name grammar, strict request-header field-value octets, request-expectation rejection, strict HTTP/1.1 Host authority syntax, canonical request-line separator containment, malformed percent-escape rejection, canonical CRLF request/header line endings, protocol-upgrade containment, request Trailer declaration containment, request TE negotiation containment, Proxy-Connection containment, canonical Connection token-list containment, Connection lifecycle conflict containment, critical Connection-option nomination containment, duplicate Connection-option containment, singleton Connection-field containment, request Keep-Alive field containment, HTTP2-Settings request containment, WebSocket handshake-metadata containment, Proxy-Authorization credential-channel containment, Authorization Connection-nomination containment, Cookie Connection-nomination containment, Forwarded Connection-nomination containment, X-Forwarded-For Connection-nomination containment, X-Forwarded-Host Connection-nomination containment, X-Forwarded-Proto Connection-nomination containment, X-Forwarded-Port Connection-nomination containment, X-Forwarded-Prefix Connection-nomination containment, X-Forwarded-Ssl Connection-nomination containment, X-Forwarded-Server Connection-nomination containment, X-Forwarded-Uri Connection-nomination containment, X-Original-URI Connection-nomination containment, X-Original-URL Connection-nomination containment, X-Rewrite-URL Connection-nomination containment, X-Forwarded-Scheme Connection-nomination containment, X-Real-IP Connection-nomination containment, X-Client-IP Connection-nomination containment, True-Client-IP Connection-nomination containment, CF-Connecting-IP Connection-nomination containment, X-Cluster-Client-IP Connection-nomination containment, Fastly-Client-IP Connection-nomination containment, Fly-Client-IP Connection-nomination containment, X-Envoy-External-Address Connection-nomination containment, X-Envoy-Original-Dst-Host Connection-nomination containment, X-Envoy-Original-Path Connection-nomination containment, X-Envoy-Original-Url Connection-nomination containment, X-Envoy-Internal Connection-nomination containment, X-Envoy-Attempt-Count Connection-nomination containment, X-Envoy-Decorator-Operation Connection-nomination containment, X-Envoy-Expected-Rq-Timeout-Ms Connection-nomination containment, X-Envoy-Upstream-Rq-Timeout-Ms Connection-nomination containment, X-Envoy-Upstream-Rq-Per-Try-Timeout-Ms Connection-nomination containment, X-Envoy-Retry-On Connection-nomination containment, X-Envoy-Retry-Grpc-On Connection-nomination containment, X-Envoy-Max-Retries Connection-nomination containment, then X-Envoy-Hedge-On-Per-Try-Timeout Connection-nomination containment.
+Protocol invariants remain fail-closed in the inherited order: request framing and target syntax; header grammar and value-octet containment; `Expect`; upgrade/Trailer/TE/Proxy-Connection; canonical Connection parsing/lifecycle/critical nomination/duplication/singleton enforcement; Keep-Alive/HTTP2-Settings/WebSocket/Proxy-Authorization; Authorization/Cookie/Forwarded and forwarding/client-IP nomination containment; Envoy external/original/internal/attempt/decorator/timeout metadata; `X-Envoy-Retry-On`; `X-Envoy-Retry-Grpc-On`; `X-Envoy-Max-Retries`; `X-Envoy-Hedge-On-Per-Try-Timeout`; then `X-Envoy-Retriable-Header-Names`.
 
 ## Safety invariants
 
-1. CPython's legacy headerless parser representation is accepted only when it is an exact empty mapping.
-2. HTTP/0.9 and unsupported/non-canonical HTTP/1.x requests remain terminally rejected before endpoint/runtime evaluation.
-3. HTTP/1.1 requests require exactly one non-empty, non-folded, non-list-like Host field and a valid operational authority.
-4. The raw request target must survive parsing unchanged and begin with exactly one `/`.
-5. Absolute-form, authority-form, asterisk-form, fragments, backslashes, controls, and raw non-ASCII target bytes are rejected.
-6. Every percent sign in an otherwise-admitted encoded target must be followed by exactly two ASCII hex digits; valid escapes remain undecoded.
-7. Any raw request-header continuation line beginning with SP or HTAB is rejected by the inherited obs-fold gate.
-8. Every physical header-field start must have a non-empty ASCII token-style name immediately followed by `:`.
-9. Every physical field value is limited to HTAB, SP, and visible ASCII; C0 controls other than HTAB, DEL, and raw non-ASCII octets are rejected.
-10. Any `Expect` field is rejected with canonical terminal 417 framing; the server emits no `100 Continue` response.
-11. An otherwise-admitted request line must reconstruct exactly with one ASCII SP between its three tokens.
-12. The request line, all physical header lines, and the blank header terminator must use CRLF; EOF is not accepted as the header terminator.
-13. Any `Upgrade` field or exact `upgrade` Connection token is rejected before dispatch.
-14. Any request `Trailer` declaration is rejected before dispatch.
-15. Any request `TE` field or exact `te` Connection token is rejected before dispatch.
-16. Any `Proxy-Connection` field or exact `proxy-connection` Connection token is rejected before dispatch.
-17. Every remaining `Connection` field must be a non-empty comma-separated list of ASCII HTTP tokens; malformed lists are terminally rejected.
-18. Requests that advertise both `close` and `keep-alive` across canonical Connection fields are terminally rejected.
-19. `Connection` options may not nominate `host`, `content-length`, `transfer-encoding`, `trailer`, `expect`, or `connection` as hop-by-hop fields.
-20. Each remaining `Connection` option may appear only once across all Connection fields, case-insensitively.
-21. At most one physical `Connection` header field may remain after all inherited gates succeed.
-22. Any physical `Keep-Alive` request field is terminally rejected; the `Connection: keep-alive` option remains governed by inherited lifecycle policy.
-23. Any physical `HTTP2-Settings` request field or exact `http2-settings` Connection option is terminally rejected.
-24. Any request field whose name begins with `Sec-WebSocket-`, case-insensitively, is terminally rejected.
-25. Any physical `Proxy-Authorization` request field or exact `proxy-authorization` Connection option is terminally rejected; ordinary `Authorization` remains outside that rule.
-26. An exact `authorization` Connection option is terminally rejected; an ordinary `Authorization` field remains end-to-end and admissible when otherwise valid.
-27. An exact `cookie` Connection option is terminally rejected; an ordinary `Cookie` field remains end-to-end and admissible when otherwise valid.
-28. An exact `forwarded` Connection option is terminally rejected; an ordinary `Forwarded` field remains end-to-end and admissible when otherwise valid.
-29. An exact `x-forwarded-for` Connection option is terminally rejected; an ordinary `X-Forwarded-For` field remains end-to-end and admissible when otherwise valid.
-30. An exact `x-forwarded-host` Connection option is terminally rejected; an ordinary `X-Forwarded-Host` field remains end-to-end and admissible when otherwise valid.
-31. An exact `x-forwarded-proto` Connection option is terminally rejected; an ordinary `X-Forwarded-Proto` field remains end-to-end and admissible when otherwise valid.
-32. An exact `x-forwarded-port` Connection option is terminally rejected; an ordinary `X-Forwarded-Port` field remains end-to-end and admissible when otherwise valid.
-33. An exact `x-forwarded-prefix` Connection option is terminally rejected; an ordinary `X-Forwarded-Prefix` field remains end-to-end and admissible when otherwise valid.
-34. An exact `x-forwarded-ssl` Connection option is terminally rejected; an ordinary `X-Forwarded-Ssl` field remains end-to-end and admissible when otherwise valid.
-35. An exact `x-forwarded-server` Connection option is terminally rejected; an ordinary `X-Forwarded-Server` field remains end-to-end and admissible when otherwise valid.
-36. An exact `x-forwarded-uri` Connection option is terminally rejected; an ordinary `X-Forwarded-Uri` field remains end-to-end and admissible when otherwise valid.
-37. An exact `x-original-uri` Connection option is terminally rejected; an ordinary `X-Original-URI` field remains end-to-end and admissible when otherwise valid.
-38. An exact `x-original-url` Connection option is terminally rejected; an ordinary `X-Original-URL` field remains end-to-end and admissible when otherwise valid.
-39. An exact `x-rewrite-url` Connection option is terminally rejected; an ordinary `X-Rewrite-URL` field remains end-to-end and admissible when otherwise valid.
-40. An exact `x-forwarded-scheme` Connection option is terminally rejected; an ordinary `X-Forwarded-Scheme` field remains end-to-end and admissible when otherwise valid.
-41. An exact `x-real-ip` Connection option is terminally rejected; an ordinary `X-Real-IP` field remains end-to-end and admissible when otherwise valid.
-42. An exact `x-client-ip` Connection option is terminally rejected; an ordinary `X-Client-IP` field remains end-to-end and admissible when otherwise valid.
-43. An exact `true-client-ip` Connection option is terminally rejected; an ordinary `True-Client-IP` field remains end-to-end and admissible when otherwise valid.
-44. An exact `cf-connecting-ip` Connection option is terminally rejected; an ordinary `CF-Connecting-IP` field remains end-to-end and admissible when otherwise valid.
-45. An exact `x-cluster-client-ip` Connection option is terminally rejected; an ordinary `X-Cluster-Client-IP` field remains end-to-end and admissible when otherwise valid.
-46. An exact `fastly-client-ip` Connection option is terminally rejected; an ordinary `Fastly-Client-IP` field remains end-to-end and admissible when otherwise valid.
-47. An exact `fly-client-ip` Connection option is terminally rejected; an ordinary `Fly-Client-IP` field remains end-to-end and admissible when otherwise valid.
-48. An exact `x-envoy-external-address` Connection option is terminally rejected; an ordinary `X-Envoy-External-Address` field remains end-to-end and admissible when otherwise valid.
-49. An exact `x-envoy-original-dst-host` Connection option is terminally rejected; an ordinary `X-Envoy-Original-Dst-Host` field remains end-to-end and admissible when otherwise valid.
-50. An exact `x-envoy-original-path` Connection option is terminally rejected; an ordinary `X-Envoy-Original-Path` field remains end-to-end and admissible when otherwise valid.
-51. An exact `x-envoy-original-url` Connection option is terminally rejected; an ordinary `X-Envoy-Original-Url` field remains end-to-end and admissible when otherwise valid.
-52. An exact `x-envoy-internal` Connection option is terminally rejected; an ordinary `X-Envoy-Internal` field remains end-to-end on this surface and admissible when otherwise valid.
-53. An exact `x-envoy-attempt-count` Connection option is terminally rejected; an ordinary `X-Envoy-Attempt-Count` field remains end-to-end on this surface and admissible when otherwise valid.
-54. An exact `x-envoy-decorator-operation` Connection option is terminally rejected; an ordinary `X-Envoy-Decorator-Operation` field remains end-to-end on this surface and admissible when otherwise valid.
-55. An exact `x-envoy-expected-rq-timeout-ms` Connection option is terminally rejected; an ordinary `X-Envoy-Expected-Rq-Timeout-Ms` field remains end-to-end on this surface and admissible when otherwise valid.
-56. An exact `x-envoy-upstream-rq-timeout-ms` Connection option is terminally rejected; an ordinary `X-Envoy-Upstream-Rq-Timeout-Ms` field remains admissible when otherwise valid.
-57. An exact `x-envoy-upstream-rq-per-try-timeout-ms` Connection option is terminally rejected; an ordinary `X-Envoy-Upstream-Rq-Per-Try-Timeout-Ms` field remains admissible when otherwise valid.
-58. An exact `x-envoy-retry-on` Connection option is terminally rejected; an ordinary `X-Envoy-Retry-On` field remains admissible when otherwise valid.
-59. An exact `x-envoy-retry-grpc-on` Connection option is terminally rejected; an ordinary `X-Envoy-Retry-Grpc-On` field remains admissible when otherwise valid.
-60. An exact `x-envoy-max-retries` Connection option is terminally rejected; an ordinary `X-Envoy-Max-Retries` field remains admissible when otherwise valid.
-61. An exact `x-envoy-hedge-on-per-try-timeout` Connection option is terminally rejected; an ordinary `X-Envoy-Hedge-On-Per-Try-Timeout` field remains admissible when otherwise valid.
-62. HEAD rejection remains bodyless while preserving representation `Content-Length`.
-63. Rejected requests cannot process trailing pipelined bytes on the same connection.
-64. Rejection releases bounded worker capacity.
-65. Header field-count, aggregate header bytes, and request-line byte budgets remain independently enforced.
-66. Silent and byte-trickle partial requests remain bounded by the inherited idle timeout and absolute parse deadline.
-67. Existing client-abort, parser-error, logging, response-body, resource, and method containment remains unchanged.
-68. All v1.6.5.x checkpoint receipt, reconciliation, and persistence semantics remain unchanged.
-69. NVIDIA driver/GPU Operator resources remain read-only in v1.6.6.6.6.6.6.6.6.6.3.3.1.2.3.4.5.6.7.5.6.2.
+1. CPython legacy headerless parser representation is accepted only when it is an exact empty mapping.
+2. HTTP/0.9 and unsupported/non-canonical HTTP/1.x requests are rejected before endpoint/runtime evaluation.
+3. HTTP/1.1 requires exactly one valid non-empty Host authority.
+4. Raw request targets must survive parsing unchanged and begin with exactly one `/`.
+5. Absolute/authority/asterisk forms, fragments, backslashes, controls, and raw non-ASCII target bytes are rejected.
+6. Percent escapes must contain exactly two ASCII hex digits.
+7. Obsolete folded request headers are rejected.
+8. Physical header names must use strict ASCII token grammar and be followed immediately by `:`.
+9. Physical field values are limited to HTAB, SP, and visible ASCII.
+10. Any `Expect` field is rejected with canonical terminal 417 framing and no `100 Continue`.
+11. Request-line token separators must reconstruct canonically with single ASCII spaces.
+12. Request/header lines and the blank terminator must use CRLF.
+13. `Upgrade` fields and exact `upgrade` Connection tokens are rejected.
+14. Request `Trailer` declarations are rejected.
+15. Request `TE` fields and exact `te` Connection tokens are rejected.
+16. `Proxy-Connection` fields and exact `proxy-connection` Connection tokens are rejected.
+17. Remaining Connection fields must be non-empty comma-separated ASCII token lists.
+18. Connection lifecycle conflicts between `close` and `keep-alive` are rejected.
+19. Connection options may not nominate Host, Content-Length, Transfer-Encoding, Trailer, Expect, or Connection.
+20. Remaining Connection options may appear only once case-insensitively.
+21. At most one physical Connection field may remain after inherited gates succeed.
+22. Physical Keep-Alive request fields are rejected.
+23. HTTP2-Settings request fields and exact nominations are rejected.
+24. `Sec-WebSocket-*` request fields are rejected.
+25. Proxy-Authorization request fields and exact nominations are rejected.
+26. Exact `authorization` nomination is rejected while ordinary Authorization remains admissible when otherwise valid.
+27. Exact `cookie` nomination is rejected while ordinary Cookie remains admissible when otherwise valid.
+28. Exact `forwarded` nomination is rejected while ordinary Forwarded remains admissible when otherwise valid.
+29. Exact `x-forwarded-for` nomination is rejected.
+30. Exact `x-forwarded-host` nomination is rejected.
+31. Exact `x-forwarded-proto` nomination is rejected.
+32. Exact `x-forwarded-port` nomination is rejected.
+33. Exact `x-forwarded-prefix` nomination is rejected.
+34. Exact `x-forwarded-ssl` nomination is rejected.
+35. Exact `x-forwarded-server` nomination is rejected.
+36. Exact `x-forwarded-uri` nomination is rejected.
+37. Exact `x-original-uri` nomination is rejected.
+38. Exact `x-original-url` nomination is rejected.
+39. Exact `x-rewrite-url` nomination is rejected.
+40. Exact `x-forwarded-scheme` nomination is rejected.
+41. Exact `x-real-ip` nomination is rejected.
+42. Exact `x-client-ip` nomination is rejected.
+43. Exact `true-client-ip` nomination is rejected.
+44. Exact `cf-connecting-ip` nomination is rejected.
+45. Exact `x-cluster-client-ip` nomination is rejected.
+46. Exact `fastly-client-ip` nomination is rejected.
+47. Exact `fly-client-ip` nomination is rejected.
+48. Exact `x-envoy-external-address` nomination is rejected.
+49. Exact `x-envoy-original-dst-host` nomination is rejected.
+50. Exact `x-envoy-original-path` nomination is rejected.
+51. Exact `x-envoy-original-url` nomination is rejected.
+52. Exact `x-envoy-internal` nomination is rejected.
+53. Exact `x-envoy-attempt-count` nomination is rejected.
+54. Exact `x-envoy-decorator-operation` nomination is rejected.
+55. Exact `x-envoy-expected-rq-timeout-ms` nomination is rejected.
+56. Exact `x-envoy-upstream-rq-timeout-ms` nomination is rejected.
+57. Exact `x-envoy-upstream-rq-per-try-timeout-ms` nomination is rejected.
+58. Exact `x-envoy-retry-on` nomination is rejected.
+59. Exact `x-envoy-retry-grpc-on` nomination is rejected.
+60. Exact `x-envoy-max-retries` nomination is rejected.
+61. Exact `x-envoy-hedge-on-per-try-timeout` nomination is rejected.
+62. Exact `x-envoy-retriable-header-names` nomination is rejected; ordinary `X-Envoy-Retriable-Header-Names` remains admissible when otherwise valid.
+63. HEAD rejection remains bodyless while preserving representation `Content-Length`.
+64. Rejected requests cannot process trailing pipelined bytes on the same connection.
+65. Rejection releases bounded worker capacity.
+66. Header field-count, aggregate header bytes, and request-line byte budgets remain independently enforced.
+67. Silent and byte-trickle partial requests remain bounded by the inherited idle timeout and absolute parse deadline.
+68. Existing client-abort, parser-error, logging, response-body, resource, and method containment remains unchanged.
+69. All v1.6.5.x checkpoint receipt, reconciliation, and persistence semantics remain unchanged.
+70. NVIDIA driver/GPU Operator resources remain read-only in v1.6.6.6.6.6.6.6.6.6.3.3.1.2.3.4.5.6.7.5.6.3.
