@@ -12,6 +12,7 @@
 - **Matching is case-insensitive.** Mixed-case exact nominations are rejected.
 - **Substring lookalikes remain outside this rule.** `tracestate-x` remains valid when otherwise admissible.
 - **Values remain opaque at this layer.** This containment examines only Connection option names and does not validate or reinterpret W3C trace state. Envoy documents `tracestate` as the W3C trace-context header carrying vendor-specific trace identification data as a set of name/value pairs.
+- **Trace-context semantics stay out of scope.** This layer does not require `Traceparent` to accompany `Tracestate`; it protects only Connection-option handling.
 - **HTTP/1.0 and HTTP/1.1 are covered.**
 - **Earlier gates retain precedence.** The complete inherited framing, credential, forwarding/client-address, Envoy timeout/retry/hedging, retriable-header/status, alt-stat, timeout-alt-response, timeout-retry-provenance, original-host, upstream-stream-duration, downstream-service-cluster/node, force-trace, IP-tags, XFCC, request-ID, client-trace-ID, OT-span-context, B3 trace-ID, B3 span-ID, B3 parent-span-ID, B3 sampled, B3 flags, compressed B3, Datadog trace-ID, Datadog parent-ID, Datadog sampling-priority, SW8, AWS X-Ray, and Traceparent gates run before this layer.
 - **Expect handling remains canonical.** Requests carrying `Expect` still terminate through the inherited `417 Request Rejected` path with no interim `100 Continue`.
