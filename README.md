@@ -1,26 +1,26 @@
-# nvlx: Linux-NVIDIA-Driver v1.6.6.6.6.6.6.6.6.6.3.3.1.2.3.4.5.1
+# nvlx: Linux-NVIDIA-Driver v1.6.6.6.6.6.6.6.6.6.3.3.1.2.3.4.5.2
 
-`nvlx` v1.6.6.6.6.6.6.6.6.6.3.3.1.2.3.4.5.1 adds `X-Original-URI` Connection-nomination containment to the live HTTP surface. After the inherited framing, version, Host, request-target, header-syntax, `Expect`, Host-authority, request-line separator, percent-escape, canonical-CRLF, protocol-upgrade, `Trailer`, `TE`, `Proxy-Connection`, canonical `Connection` token-list, lifecycle-conflict, critical-nomination, duplicate-option, singleton-Connection-field, `Keep-Alive`, `HTTP2-Settings`, WebSocket-metadata, `Proxy-Authorization`, `Authorization` nomination, `Cookie` nomination, `Forwarded` nomination, `X-Forwarded-For` nomination, `X-Forwarded-Host` nomination, `X-Forwarded-Proto` nomination, `X-Forwarded-Port` nomination, `X-Forwarded-Prefix` nomination, `X-Forwarded-Ssl` nomination, `X-Forwarded-Server` nomination, and `X-Forwarded-Uri` nomination gates succeed, the server rejects any exact `x-original-uri` Connection option before endpoint or runtime evaluation while continuing to admit ordinary `X-Original-URI` fields.
+`nvlx` v1.6.6.6.6.6.6.6.6.6.3.3.1.2.3.4.5.2 adds `X-Original-URL` Connection-nomination containment to the live HTTP surface. After the inherited framing, version, Host, request-target, header-syntax, `Expect`, Host-authority, request-line separator, percent-escape, canonical-CRLF, protocol-upgrade, `Trailer`, `TE`, `Proxy-Connection`, canonical `Connection` token-list, lifecycle-conflict, critical-nomination, duplicate-option, singleton-Connection-field, `Keep-Alive`, `HTTP2-Settings`, WebSocket-metadata, `Proxy-Authorization`, `Authorization` nomination, `Cookie` nomination, `Forwarded` nomination, `X-Forwarded-For` nomination, `X-Forwarded-Host` nomination, `X-Forwarded-Proto` nomination, `X-Forwarded-Port` nomination, `X-Forwarded-Prefix` nomination, `X-Forwarded-Ssl` nomination, `X-Forwarded-Server` nomination, `X-Forwarded-Uri` nomination, and `X-Original-URI` nomination gates succeed, the server rejects any exact `x-original-url` Connection option before endpoint or runtime evaluation while continuing to admit ordinary `X-Original-URL` fields.
 
 > [!IMPORTANT]
 > NVIDIA driver/GPU Operator resources remain read-only. The operator still mutates only nvlx-owned GPUFleet status/finalizers plus its existing Lease and Events.
 
-## v1.6.6.6.6.6.6.6.6.6.3.3.1.2.3.4.5.1 X-Original-URI Connection-nomination containment
+## v1.6.6.6.6.6.6.6.6.6.3.3.1.2.3.4.5.2 X-Original-URL Connection-nomination containment
 
-- **X-Original-URI remains end-to-end.** A normal request `X-Original-URI` field remains admissible when all inherited gates accept it.
-- **Hop-by-hop demotion is terminal.** An exact `x-original-uri` Connection option is rejected through canonical `400 Request Rejected` framing.
-- **Matching is case-insensitive.** `Connection: X-Original-URI` and mixed-case variants are rejected.
-- **Substring lookalikes remain outside this rule.** Options such as `x-original-uri-x` remain valid when otherwise admissible.
-- **X-Original-URI values are opaque.** This layer examines only Connection option names and does not interpret, log, split, validate, normalize, or trust `X-Original-URI` values.
-- **HTTP/1.0 and HTTP/1.1 are covered.** X-Original-URI nomination is refused under either admitted request version.
-- **Earlier gates retain precedence.** `Expect`, `Upgrade`, `HTTP2-Settings`, WebSocket metadata, `Keep-Alive`, `Proxy-Authorization`, `Authorization` nomination, `Cookie` nomination, `Forwarded` nomination, `X-Forwarded-For` nomination, `X-Forwarded-Host` nomination, `X-Forwarded-Proto` nomination, `X-Forwarded-Port` nomination, `X-Forwarded-Prefix` nomination, `X-Forwarded-Ssl` nomination, `X-Forwarded-Server` nomination, `X-Forwarded-Uri` nomination, malformed Connection lists, lifecycle conflicts, critical nomination, duplicate options, repeated Connection fields, `TE`, and `Proxy-Connection` still run before this layer.
+- **X-Original-URL remains end-to-end.** A normal request `X-Original-URL` field remains admissible when all inherited gates accept it.
+- **Hop-by-hop demotion is terminal.** An exact `x-original-url` Connection option is rejected through canonical `400 Request Rejected` framing.
+- **Matching is case-insensitive.** `Connection: X-Original-URL` and mixed-case variants are rejected.
+- **Substring lookalikes remain outside this rule.** Options such as `x-original-url-x` remain valid when otherwise admissible.
+- **X-Original-URL values are opaque.** This layer examines only Connection option names and does not interpret, log, split, validate, normalize, or trust `X-Original-URL` values.
+- **HTTP/1.0 and HTTP/1.1 are covered.** X-Original-URL nomination is refused under either admitted request version.
+- **Earlier gates retain precedence.** `Expect`, `Upgrade`, `HTTP2-Settings`, WebSocket metadata, `Keep-Alive`, `Proxy-Authorization`, `Authorization` nomination, `Cookie` nomination, `Forwarded` nomination, `X-Forwarded-For` nomination, `X-Forwarded-Host` nomination, `X-Forwarded-Proto` nomination, `X-Forwarded-Port` nomination, `X-Forwarded-Prefix` nomination, `X-Forwarded-Ssl` nomination, `X-Forwarded-Server` nomination, `X-Forwarded-Uri` nomination, `X-Original-URI` nomination, malformed Connection lists, lifecycle conflicts, critical nomination, duplicate options, repeated Connection fields, `TE`, and `Proxy-Connection` still run before this layer.
 - **The canonical Expect contract remains intact.** A request that also carries `Expect` is rejected by the earlier `417 Request Rejected` gate and emits no interim `100 Continue` response.
-- **X-Original-URI-nomination failures use canonical terminal 400 framing.** Rejection closes the connection so trailing bytes cannot become a pipelined follow-on request.
+- **X-Original-URL-nomination failures use canonical terminal 400 framing.** Rejection closes the connection so trailing bytes cannot become a pipelined follow-on request.
 - **HEAD rejection remains bodyless.** Representation `Content-Length` is preserved without sending the rejection body.
-- **Runtime/endpoint evaluation remains isolated.** X-Original-URI nomination cannot invoke readiness or metrics diagnosis.
+- **Runtime/endpoint evaluation remains isolated.** X-Original-URL nomination cannot invoke readiness or metrics diagnosis.
 - **Admission capacity recovers normally.** Rejection releases its bounded worker slot.
 - **Existing ingress defenses remain intact.** The 8 KiB request-line budget, 32 KiB aggregate header budget, 32-field header cap, 5-second idle timeout, 5-second absolute header deadline, and 32-request admission cap are unchanged.
-- **The live operator now uses `http_v1666666666331123451`.** The live runtime remains `runtime_v1664`.
+- **The live operator now uses `http_v1666666666331123452`.** The live runtime remains `runtime_v1664`.
 - **Checkpoint persistence, Prometheus schema, RBAC, readiness policy, and NVIDIA mutation behavior are unchanged.**
 
 ## Ingress resource model
@@ -34,7 +34,7 @@ The live server retains six independent quantitative ingress bounds:
 5. `max_request_header_bytes` — aggregate request-header byte budget, default 32768 bytes.
 6. `max_request_header_fields` — request-header field-count budget, default 32 fields.
 
-The quantitative budgets remain independent. Protocol invariants are enforced in a fail-closed chain: bodyless framing, exact HTTP/1.0 or HTTP/1.1 request version, HTTP/1.1 singleton Host framing, canonical origin-form request-target containment, obsolete folded-header rejection, strict request-header field-name grammar, strict request-header field-value octets, request-expectation rejection, strict HTTP/1.1 Host authority syntax, canonical request-line separator containment, malformed percent-escape rejection, canonical CRLF request/header line endings, protocol-upgrade containment, request `Trailer` declaration containment, request `TE` negotiation containment, `Proxy-Connection` containment, canonical `Connection` token-list containment, `Connection` lifecycle conflict containment, critical `Connection`-option nomination containment, duplicate `Connection`-option containment, singleton `Connection`-field containment, request `Keep-Alive` field containment, `HTTP2-Settings` request containment, WebSocket handshake-metadata containment, `Proxy-Authorization` credential-channel containment, `Authorization` Connection-nomination containment, `Cookie` Connection-nomination containment, `Forwarded` Connection-nomination containment, `X-Forwarded-For` Connection-nomination containment, `X-Forwarded-Host` Connection-nomination containment, `X-Forwarded-Proto` Connection-nomination containment, `X-Forwarded-Port` Connection-nomination containment, `X-Forwarded-Prefix` Connection-nomination containment, `X-Forwarded-Ssl` Connection-nomination containment, `X-Forwarded-Server` Connection-nomination containment, `X-Forwarded-Uri` Connection-nomination containment, then `X-Original-URI` Connection-nomination containment.
+The quantitative budgets remain independent. Protocol invariants are enforced in a fail-closed chain: bodyless framing, exact HTTP/1.0 or HTTP/1.1 request version, HTTP/1.1 singleton Host framing, canonical origin-form request-target containment, obsolete folded-header rejection, strict request-header field-name grammar, strict request-header field-value octets, request-expectation rejection, strict HTTP/1.1 Host authority syntax, canonical request-line separator containment, malformed percent-escape rejection, canonical CRLF request/header line endings, protocol-upgrade containment, request `Trailer` declaration containment, request `TE` negotiation containment, `Proxy-Connection` containment, canonical `Connection` token-list containment, `Connection` lifecycle conflict containment, critical `Connection`-option nomination containment, duplicate `Connection`-option containment, singleton `Connection`-field containment, request `Keep-Alive` field containment, `HTTP2-Settings` request containment, WebSocket handshake-metadata containment, `Proxy-Authorization` credential-channel containment, `Authorization` Connection-nomination containment, `Cookie` Connection-nomination containment, `Forwarded` Connection-nomination containment, `X-Forwarded-For` Connection-nomination containment, `X-Forwarded-Host` Connection-nomination containment, `X-Forwarded-Proto` Connection-nomination containment, `X-Forwarded-Port` Connection-nomination containment, `X-Forwarded-Prefix` Connection-nomination containment, `X-Forwarded-Ssl` Connection-nomination containment, `X-Forwarded-Server` Connection-nomination containment, `X-Forwarded-Uri` Connection-nomination containment, `X-Original-URI` Connection-nomination containment, then `X-Original-URL` Connection-nomination containment.
 
 ## Safety invariants
 
@@ -75,11 +75,12 @@ The quantitative budgets remain independent. Protocol invariants are enforced in
 35. An exact `x-forwarded-server` Connection option is terminally rejected; an ordinary `X-Forwarded-Server` field remains end-to-end and admissible when otherwise valid.
 36. An exact `x-forwarded-uri` Connection option is terminally rejected; an ordinary `X-Forwarded-Uri` field remains end-to-end and admissible when otherwise valid.
 37. An exact `x-original-uri` Connection option is terminally rejected; an ordinary `X-Original-URI` field remains end-to-end and admissible when otherwise valid.
-38. HEAD rejection remains bodyless while preserving representation `Content-Length`.
-39. Rejected requests cannot process trailing pipelined bytes on the same connection.
-40. Rejection releases bounded worker capacity.
-41. Header field-count, aggregate header bytes, and request-line byte budgets remain independently enforced.
-42. Silent and byte-trickle partial requests remain bounded by the inherited idle timeout and absolute parse deadline.
-43. Existing client-abort, parser-error, logging, response-body, resource, and method containment remains unchanged.
-44. All v1.6.5.x checkpoint receipt, reconciliation, and persistence semantics remain unchanged.
-45. NVIDIA driver/GPU Operator resources remain read-only in v1.6.6.6.6.6.6.6.6.6.3.3.1.2.3.4.5.1.
+38. An exact `x-original-url` Connection option is terminally rejected; an ordinary `X-Original-URL` field remains end-to-end and admissible when otherwise valid.
+39. HEAD rejection remains bodyless while preserving representation `Content-Length`.
+40. Rejected requests cannot process trailing pipelined bytes on the same connection.
+41. Rejection releases bounded worker capacity.
+42. Header field-count, aggregate header bytes, and request-line byte budgets remain independently enforced.
+43. Silent and byte-trickle partial requests remain bounded by the inherited idle timeout and absolute parse deadline.
+44. Existing client-abort, parser-error, logging, response-body, resource, and method containment remains unchanged.
+45. All v1.6.5.x checkpoint receipt, reconciliation, and persistence semantics remain unchanged.
+46. NVIDIA driver/GPU Operator resources remain read-only in v1.6.6.6.6.6.6.6.6.6.3.3.1.2.3.4.5.2.
