@@ -1,25 +1,25 @@
-# nvlx: Linux-NVIDIA-Driver v1.6.6.6.6.6.6.6.6.6.3.3.1.2.3.4.5.6.7.5.6.7
+# nvlx: Linux-NVIDIA-Driver v1.6.6.6.6.6.6.6.6.6.3.3.1.2.3.4.5.6.7.5.6.7.1
 
-`nvlx` v1.6.6.6.6.6.6.6.6.6.3.3.1.2.3.4.5.6.7.5.6.7 adds `X-Envoy-Is-Timeout-Retry` Connection-nomination containment to the live HTTP surface. After inherited ingress and proxy-metadata gates succeed, the server rejects an exact `x-envoy-is-timeout-retry` Connection option before endpoint/runtime evaluation while continuing to admit ordinary `X-Envoy-Is-Timeout-Retry` fields.
+`nvlx` v1.6.6.6.6.6.6.6.6.6.3.3.1.2.3.4.5.6.7.5.6.7.1 adds `X-Envoy-Original-Host` Connection-nomination containment to the live HTTP surface. After inherited ingress and proxy-metadata gates succeed, the server rejects an exact `x-envoy-original-host` Connection option before endpoint/runtime evaluation while continuing to admit ordinary `X-Envoy-Original-Host` fields.
 
 > [!IMPORTANT]
 > NVIDIA driver/GPU Operator resources remain read-only. The operator still mutates only nvlx-owned GPUFleet status/finalizers plus its existing Lease and Events.
 
-## v1.6.6.6.6.6.6.6.6.6.3.3.1.2.3.4.5.6.7.5.6.7 X-Envoy-Is-Timeout-Retry Connection-nomination containment
+## v1.6.6.6.6.6.6.6.6.6.3.3.1.2.3.4.5.6.7.5.6.7.1 X-Envoy-Original-Host Connection-nomination containment
 
-- **Ordinary retry-provenance metadata remains admissible.** `X-Envoy-Is-Timeout-Retry` is accepted when all inherited gates accept the request.
-- **Hop-by-hop demotion is terminal.** Exact `x-envoy-is-timeout-retry` Connection nomination receives canonical `400 Request Rejected` framing.
+- **Ordinary host-rewrite provenance remains admissible.** `X-Envoy-Original-Host` is accepted when all inherited gates accept the request.
+- **Hop-by-hop demotion is terminal.** Exact `x-envoy-original-host` Connection nomination receives canonical `400 Request Rejected` framing.
 - **Matching is case-insensitive.** Mixed-case exact nominations are rejected.
-- **Substring lookalikes remain outside this rule.** `x-envoy-is-timeout-retry-x` remains valid when otherwise admissible.
-- **Values remain opaque at this layer.** This containment examines only Connection option names. Envoy sets this request header on upstream calls to indicate a retry initiated by timeouts when `include_is_timeout_retry_header` is enabled.
+- **Substring lookalikes remain outside this rule.** `x-envoy-original-host-x` remains valid when otherwise admissible.
+- **Values remain opaque at this layer.** This containment examines only Connection option names. Envoy records the original host value in `X-Envoy-Original-Host` when router host-rewrite behavior mutates the forwarded host, making the field useful for logging and debugging.
 - **HTTP/1.0 and HTTP/1.1 are covered.**
-- **Earlier gates retain precedence.** The complete inherited framing, credential, forwarding/client-address, Envoy timeout/retry/hedging, retriable-header/status, alt-stat, and timeout-alt-response gates run before this layer.
+- **Earlier gates retain precedence.** The complete inherited framing, credential, forwarding/client-address, Envoy timeout/retry/hedging, retriable-header/status, alt-stat, timeout-alt-response, and timeout-retry-provenance gates run before this layer.
 - **Expect handling remains canonical.** Requests carrying `Expect` still terminate through the inherited `417 Request Rejected` path with no interim `100 Continue`.
 - **HEAD rejection remains bodyless.** Representation `Content-Length` is preserved without sending the rejection body.
 - **Pipeline and runtime isolation remain intact.** Rejected requests cannot dispatch trailing pipelined bytes or invoke readiness/metrics evaluation.
 - **Admission capacity recovers normally.** Rejection releases its bounded worker slot.
 - **Ingress budgets are unchanged.** 8 KiB request line, 32 KiB aggregate headers, 32 fields, 5-second idle timeout, 5-second absolute header deadline, 32 concurrent requests.
-- **The live operator now uses `http_v16666666663311234567567`.** The live runtime remains `runtime_v1664`.
+- **The live operator now uses `http_v166666666633112345675671`.** The live runtime remains `runtime_v1664`.
 - **Checkpoint persistence, Prometheus schema, RBAC, readiness policy, and NVIDIA mutation behavior are unchanged.**
 
 ## Ingress resource model
@@ -31,7 +31,7 @@
 5. `max_request_header_bytes` — default 32768 bytes.
 6. `max_request_header_fields` — default 32 fields.
 
-Protocol invariants remain fail-closed in the inherited order: request framing and target syntax; header grammar and value-octet containment; `Expect`; upgrade/Trailer/TE/Proxy-Connection; canonical Connection parsing/lifecycle/critical nomination/duplication/singleton enforcement; Keep-Alive/HTTP2-Settings/WebSocket/Proxy-Authorization; Authorization/Cookie/Forwarded and forwarding/client-IP nomination containment; Envoy external/original/internal/attempt/decorator/timeout metadata; `X-Envoy-Retry-On`; `X-Envoy-Retry-Grpc-On`; `X-Envoy-Max-Retries`; `X-Envoy-Hedge-On-Per-Try-Timeout`; `X-Envoy-Retriable-Header-Names`; `X-Envoy-Retriable-Status-Codes`; `X-Envoy-Upstream-Alt-Stat-Name`; `X-Envoy-Upstream-Rq-Timeout-Alt-Response`; then `X-Envoy-Is-Timeout-Retry`.
+Protocol invariants remain fail-closed in the inherited order: request framing and target syntax; header grammar and value-octet containment; `Expect`; upgrade/Trailer/TE/Proxy-Connection; canonical Connection parsing/lifecycle/critical nomination/duplication/singleton enforcement; Keep-Alive/HTTP2-Settings/WebSocket/Proxy-Authorization; Authorization/Cookie/Forwarded and forwarding/client-IP nomination containment; Envoy external/original/internal/attempt/decorator/timeout metadata; `X-Envoy-Retry-On`; `X-Envoy-Retry-Grpc-On`; `X-Envoy-Max-Retries`; `X-Envoy-Hedge-On-Per-Try-Timeout`; `X-Envoy-Retriable-Header-Names`; `X-Envoy-Retriable-Status-Codes`; `X-Envoy-Upstream-Alt-Stat-Name`; `X-Envoy-Upstream-Rq-Timeout-Alt-Response`; `X-Envoy-Is-Timeout-Retry`; then `X-Envoy-Original-Host`.
 
 ## Safety invariants
 
@@ -101,11 +101,12 @@ Protocol invariants remain fail-closed in the inherited order: request framing a
 64. Exact `x-envoy-upstream-alt-stat-name` nomination is rejected; ordinary `X-Envoy-Upstream-Alt-Stat-Name` remains admissible when otherwise valid.
 65. Exact `x-envoy-upstream-rq-timeout-alt-response` nomination is rejected; ordinary `X-Envoy-Upstream-Rq-Timeout-Alt-Response` remains admissible when otherwise valid.
 66. Exact `x-envoy-is-timeout-retry` nomination is rejected; ordinary `X-Envoy-Is-Timeout-Retry` remains admissible when otherwise valid.
-67. HEAD rejection remains bodyless while preserving representation `Content-Length`.
-68. Rejected requests cannot process trailing pipelined bytes on the same connection.
-69. Rejection releases bounded worker capacity.
-70. Header field-count, aggregate header bytes, and request-line byte budgets remain independently enforced.
-71. Silent and byte-trickle partial requests remain bounded by the inherited idle timeout and absolute parse deadline.
-72. Existing client-abort, parser-error, logging, response-body, resource, and method containment remains unchanged.
-73. All v1.6.5.x checkpoint receipt, reconciliation, and persistence semantics remain unchanged.
-74. NVIDIA driver/GPU Operator resources remain read-only in v1.6.6.6.6.6.6.6.6.6.3.3.1.2.3.4.5.6.7.5.6.7.
+67. Exact `x-envoy-original-host` nomination is rejected; ordinary `X-Envoy-Original-Host` remains admissible when otherwise valid.
+68. HEAD rejection remains bodyless while preserving representation `Content-Length`.
+69. Rejected requests cannot process trailing pipelined bytes on the same connection.
+70. Rejection releases bounded worker capacity.
+71. Header field-count, aggregate header bytes, and request-line byte budgets remain independently enforced.
+72. Silent and byte-trickle partial requests remain bounded by the inherited idle timeout and absolute parse deadline.
+73. Existing client-abort, parser-error, logging, response-body, resource, and method containment remains unchanged.
+74. All v1.6.5.x checkpoint receipt, reconciliation, and persistence semantics remain unchanged.
+75. NVIDIA driver/GPU Operator resources remain read-only in v1.6.6.6.6.6.6.6.6.6.3.3.1.2.3.4.5.6.7.5.6.7.1.
