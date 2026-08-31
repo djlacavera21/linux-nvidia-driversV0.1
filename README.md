@@ -1,26 +1,26 @@
-# nvlx: Linux-NVIDIA-Driver v1.6.6.6.6.6.6.6.6.6.3.3.1.2.3.4.5.6.3
+# nvlx: Linux-NVIDIA-Driver v1.6.6.6.6.6.6.6.6.6.3.3.1.2.3.4.5.6.5
 
-`nvlx` v1.6.6.6.6.6.6.6.6.6.3.3.1.2.3.4.5.6.3 adds `X-Cluster-Client-IP` Connection-nomination containment to the live HTTP surface. After the inherited framing, version, Host, request-target, header-syntax, `Expect`, Host-authority, request-line separator, percent-escape, canonical-CRLF, protocol-upgrade, `Trailer`, `TE`, `Proxy-Connection`, canonical `Connection` token-list, lifecycle-conflict, critical-nomination, duplicate-option, singleton-Connection-field, `Keep-Alive`, `HTTP2-Settings`, WebSocket-metadata, `Proxy-Authorization`, `Authorization` nomination, `Cookie` nomination, `Forwarded` nomination, `X-Forwarded-For` nomination, `X-Forwarded-Host` nomination, `X-Forwarded-Proto` nomination, `X-Forwarded-Port` nomination, `X-Forwarded-Prefix` nomination, `X-Forwarded-Ssl` nomination, `X-Forwarded-Server` nomination, `X-Forwarded-Uri` nomination, `X-Original-URI` nomination, `X-Original-URL` nomination, `X-Rewrite-URL` nomination, `X-Forwarded-Scheme` nomination, `X-Real-IP` nomination, `X-Client-IP` nomination, `True-Client-IP` nomination, and `CF-Connecting-IP` nomination gates succeed, the server rejects any exact `x-cluster-client-ip` Connection option before endpoint or runtime evaluation while continuing to admit ordinary `X-Cluster-Client-IP` fields.
+`nvlx` v1.6.6.6.6.6.6.6.6.6.3.3.1.2.3.4.5.6.5 adds `Fastly-Client-IP` Connection-nomination containment to the live HTTP surface. After the inherited ingress and proxy-metadata gates succeed, the server rejects any exact `fastly-client-ip` Connection option before endpoint or runtime evaluation while continuing to admit ordinary `Fastly-Client-IP` fields.
 
 > [!IMPORTANT]
 > NVIDIA driver/GPU Operator resources remain read-only. The operator still mutates only nvlx-owned GPUFleet status/finalizers plus its existing Lease and Events.
 
-## v1.6.6.6.6.6.6.6.6.6.3.3.1.2.3.4.5.6.3 X-Cluster-Client-IP Connection-nomination containment
+## v1.6.6.6.6.6.6.6.6.6.3.3.1.2.3.4.5.6.5 Fastly-Client-IP Connection-nomination containment
 
-- **X-Cluster-Client-IP remains end-to-end.** A normal request `X-Cluster-Client-IP` field remains admissible when all inherited gates accept it.
-- **Hop-by-hop demotion is terminal.** An exact `x-cluster-client-ip` Connection option is rejected through canonical `400 Request Rejected` framing.
-- **Matching is case-insensitive.** `Connection: X-Cluster-Client-IP` and mixed-case variants are rejected.
-- **Substring lookalikes remain outside this rule.** Options such as `x-cluster-client-ip-x` remain valid when otherwise admissible.
-- **X-Cluster-Client-IP values are opaque.** This layer examines only Connection option names and does not interpret, log, split, validate, normalize, or trust `X-Cluster-Client-IP` values.
-- **HTTP/1.0 and HTTP/1.1 are covered.** X-Cluster-Client-IP nomination is refused under either admitted request version.
-- **Earlier gates retain precedence.** `Expect`, `Upgrade`, `HTTP2-Settings`, WebSocket metadata, `Keep-Alive`, `Proxy-Authorization`, `Authorization` nomination, `Cookie` nomination, `Forwarded` nomination, `X-Forwarded-For` nomination, `X-Forwarded-Host` nomination, `X-Forwarded-Proto` nomination, `X-Forwarded-Port` nomination, `X-Forwarded-Prefix` nomination, `X-Forwarded-Ssl` nomination, `X-Forwarded-Server` nomination, `X-Forwarded-Uri` nomination, `X-Original-URI` nomination, `X-Original-URL` nomination, `X-Rewrite-URL` nomination, `X-Forwarded-Scheme` nomination, `X-Real-IP` nomination, `X-Client-IP` nomination, `True-Client-IP` nomination, `CF-Connecting-IP` nomination, malformed Connection lists, lifecycle conflicts, critical nomination, duplicate options, repeated Connection fields, `TE`, and `Proxy-Connection` still run before this layer.
+- **Fastly-Client-IP remains end-to-end.** A normal request `Fastly-Client-IP` field remains admissible when all inherited gates accept it.
+- **Hop-by-hop demotion is terminal.** An exact `fastly-client-ip` Connection option is rejected through canonical `400 Request Rejected` framing.
+- **Matching is case-insensitive.** `Connection: Fastly-Client-IP` and mixed-case variants are rejected.
+- **Substring lookalikes remain outside this rule.** Options such as `fastly-client-ip-x` remain valid when otherwise admissible.
+- **Fastly-Client-IP values are opaque.** This layer examines only Connection option names and does not interpret, log, split, validate, normalize, or trust `Fastly-Client-IP` values.
+- **HTTP/1.0 and HTTP/1.1 are covered.** Fastly-Client-IP nomination is refused under either admitted request version.
+- **Earlier gates retain precedence.** `Expect`, upgrade/framing/Connection policy, credentials, forwarding metadata, client-IP metadata, and `X-Cluster-Client-IP` nomination all run before this layer.
 - **The canonical Expect contract remains intact.** A request that also carries `Expect` is rejected by the earlier `417 Request Rejected` gate and emits no interim `100 Continue` response.
-- **X-Cluster-Client-IP-nomination failures use canonical terminal 400 framing.** Rejection closes the connection so trailing bytes cannot become a pipelined follow-on request.
+- **Fastly-Client-IP-nomination failures use canonical terminal 400 framing.** Rejection closes the connection so trailing bytes cannot become a pipelined follow-on request.
 - **HEAD rejection remains bodyless.** Representation `Content-Length` is preserved without sending the rejection body.
-- **Runtime/endpoint evaluation remains isolated.** X-Cluster-Client-IP nomination cannot invoke readiness or metrics diagnosis.
+- **Runtime/endpoint evaluation remains isolated.** Fastly-Client-IP nomination cannot invoke readiness or metrics diagnosis.
 - **Admission capacity recovers normally.** Rejection releases its bounded worker slot.
 - **Existing ingress defenses remain intact.** The 8 KiB request-line budget, 32 KiB aggregate header budget, 32-field header cap, 5-second idle timeout, 5-second absolute header deadline, and 32-request admission cap are unchanged.
-- **The live operator now uses `http_v16666666663311234563`.** The live runtime remains `runtime_v1664`.
+- **The live operator now uses `http_v16666666663311234565`.** The live runtime remains `runtime_v1664`.
 - **Checkpoint persistence, Prometheus schema, RBAC, readiness policy, and NVIDIA mutation behavior are unchanged.**
 
 ## Ingress resource model
@@ -34,7 +34,7 @@ The live server retains six independent quantitative ingress bounds:
 5. `max_request_header_bytes` — aggregate request-header byte budget, default 32768 bytes.
 6. `max_request_header_fields` — request-header field-count budget, default 32 fields.
 
-The quantitative budgets remain independent. Protocol invariants are enforced in a fail-closed chain: bodyless framing, exact HTTP/1.0 or HTTP/1.1 request version, HTTP/1.1 singleton Host framing, canonical origin-form request-target containment, obsolete folded-header rejection, strict request-header field-name grammar, strict request-header field-value octets, request-expectation rejection, strict HTTP/1.1 Host authority syntax, canonical request-line separator containment, malformed percent-escape rejection, canonical CRLF request/header line endings, protocol-upgrade containment, request `Trailer` declaration containment, request `TE` negotiation containment, `Proxy-Connection` containment, canonical `Connection` token-list containment, `Connection` lifecycle conflict containment, critical `Connection`-option nomination containment, duplicate `Connection`-option containment, singleton `Connection`-field containment, request `Keep-Alive` field containment, `HTTP2-Settings` request containment, WebSocket handshake-metadata containment, `Proxy-Authorization` credential-channel containment, `Authorization` Connection-nomination containment, `Cookie` Connection-nomination containment, `Forwarded` Connection-nomination containment, `X-Forwarded-For` Connection-nomination containment, `X-Forwarded-Host` Connection-nomination containment, `X-Forwarded-Proto` Connection-nomination containment, `X-Forwarded-Port` Connection-nomination containment, `X-Forwarded-Prefix` Connection-nomination containment, `X-Forwarded-Ssl` Connection-nomination containment, `X-Forwarded-Server` Connection-nomination containment, `X-Forwarded-Uri` Connection-nomination containment, `X-Original-URI` Connection-nomination containment, `X-Original-URL` Connection-nomination containment, `X-Rewrite-URL` Connection-nomination containment, `X-Forwarded-Scheme` Connection-nomination containment, `X-Real-IP` Connection-nomination containment, `X-Client-IP` Connection-nomination containment, `True-Client-IP` Connection-nomination containment, `CF-Connecting-IP` Connection-nomination containment, then `X-Cluster-Client-IP` Connection-nomination containment.
+The quantitative budgets remain independent. Protocol invariants are enforced in a fail-closed chain: bodyless framing, exact HTTP/1.0 or HTTP/1.1 request version, HTTP/1.1 singleton Host framing, canonical origin-form request-target containment, obsolete folded-header rejection, strict request-header field-name grammar, strict request-header field-value octets, request-expectation rejection, strict HTTP/1.1 Host authority syntax, canonical request-line separator containment, malformed percent-escape rejection, canonical CRLF request/header line endings, protocol-upgrade containment, request Trailer declaration containment, request TE negotiation containment, Proxy-Connection containment, canonical Connection token-list containment, Connection lifecycle conflict containment, critical Connection-option nomination containment, duplicate Connection-option containment, singleton Connection-field containment, request Keep-Alive field containment, HTTP2-Settings request containment, WebSocket handshake-metadata containment, Proxy-Authorization credential-channel containment, Authorization Connection-nomination containment, Cookie Connection-nomination containment, Forwarded Connection-nomination containment, X-Forwarded-For Connection-nomination containment, X-Forwarded-Host Connection-nomination containment, X-Forwarded-Proto Connection-nomination containment, X-Forwarded-Port Connection-nomination containment, X-Forwarded-Prefix Connection-nomination containment, X-Forwarded-Ssl Connection-nomination containment, X-Forwarded-Server Connection-nomination containment, X-Forwarded-Uri Connection-nomination containment, X-Original-URI Connection-nomination containment, X-Original-URL Connection-nomination containment, X-Rewrite-URL Connection-nomination containment, X-Forwarded-Scheme Connection-nomination containment, X-Real-IP Connection-nomination containment, X-Client-IP Connection-nomination containment, True-Client-IP Connection-nomination containment, CF-Connecting-IP Connection-nomination containment, X-Cluster-Client-IP Connection-nomination containment, then Fastly-Client-IP Connection-nomination containment.
 
 ## Safety invariants
 
@@ -83,11 +83,12 @@ The quantitative budgets remain independent. Protocol invariants are enforced in
 43. An exact `true-client-ip` Connection option is terminally rejected; an ordinary `True-Client-IP` field remains end-to-end and admissible when otherwise valid.
 44. An exact `cf-connecting-ip` Connection option is terminally rejected; an ordinary `CF-Connecting-IP` field remains end-to-end and admissible when otherwise valid.
 45. An exact `x-cluster-client-ip` Connection option is terminally rejected; an ordinary `X-Cluster-Client-IP` field remains end-to-end and admissible when otherwise valid.
-46. HEAD rejection remains bodyless while preserving representation `Content-Length`.
-47. Rejected requests cannot process trailing pipelined bytes on the same connection.
-48. Rejection releases bounded worker capacity.
-49. Header field-count, aggregate header bytes, and request-line byte budgets remain independently enforced.
-50. Silent and byte-trickle partial requests remain bounded by the inherited idle timeout and absolute parse deadline.
-51. Existing client-abort, parser-error, logging, response-body, resource, and method containment remains unchanged.
-52. All v1.6.5.x checkpoint receipt, reconciliation, and persistence semantics remain unchanged.
-53. NVIDIA driver/GPU Operator resources remain read-only in v1.6.6.6.6.6.6.6.6.6.3.3.1.2.3.4.5.6.3.
+46. An exact `fastly-client-ip` Connection option is terminally rejected; an ordinary `Fastly-Client-IP` field remains end-to-end and admissible when otherwise valid.
+47. HEAD rejection remains bodyless while preserving representation `Content-Length`.
+48. Rejected requests cannot process trailing pipelined bytes on the same connection.
+49. Rejection releases bounded worker capacity.
+50. Header field-count, aggregate header bytes, and request-line byte budgets remain independently enforced.
+51. Silent and byte-trickle partial requests remain bounded by the inherited idle timeout and absolute parse deadline.
+52. Existing client-abort, parser-error, logging, response-body, resource, and method containment remains unchanged.
+53. All v1.6.5.x checkpoint receipt, reconciliation, and persistence semantics remain unchanged.
+54. NVIDIA driver/GPU Operator resources remain read-only in v1.6.6.6.6.6.6.6.6.6.3.3.1.2.3.4.5.6.5.
