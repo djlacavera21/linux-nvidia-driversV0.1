@@ -1,25 +1,25 @@
-# nvlx: Linux-NVIDIA-Driver v1.6.6.6.6.6.6.6.6.6.3.3.1.2.3.4.5.6.7.5.6.7.8
+# nvlx: Linux-NVIDIA-Driver v1.6.6.6.6.6.6.6.6.6.3.3.1.2.3.4.5.6.7.5.6.7.8.1
 
-`nvlx` v1.6.6.6.6.6.6.6.6.6.3.3.1.2.3.4.5.6.7.5.6.7.8 adds `X-Request-ID` Connection-nomination containment to the live HTTP surface. After inherited ingress and proxy-metadata gates succeed, the server rejects an exact `x-request-id` Connection option before endpoint/runtime evaluation while continuing to admit ordinary `X-Request-ID` fields.
+`nvlx` v1.6.6.6.6.6.6.6.6.6.3.3.1.2.3.4.5.6.7.5.6.7.8.1 adds `X-Client-Trace-ID` Connection-nomination containment to the live HTTP surface. After inherited ingress and proxy-metadata gates succeed, the server rejects an exact `x-client-trace-id` Connection option before endpoint/runtime evaluation while continuing to admit ordinary `X-Client-Trace-ID` fields.
 
 > [!IMPORTANT]
 > NVIDIA driver/GPU Operator resources remain read-only. The operator still mutates only nvlx-owned GPUFleet status/finalizers plus its existing Lease and Events.
 
-## v1.6.6.6.6.6.6.6.6.6.3.3.1.2.3.4.5.6.7.5.6.7.8 X-Request-ID Connection-nomination containment
+## v1.6.6.6.6.6.6.6.6.6.3.3.1.2.3.4.5.6.7.5.6.7.8.1 X-Client-Trace-ID Connection-nomination containment
 
-- **Ordinary request identity remains admissible.** `X-Request-ID` is accepted when all inherited gates accept the request.
-- **Hop-by-hop demotion is terminal.** Exact `x-request-id` Connection nomination receives canonical `400 Request Rejected` framing.
+- **Ordinary client tracing metadata remains admissible.** `X-Client-Trace-ID` is accepted when all inherited gates accept the request.
+- **Hop-by-hop demotion is terminal.** Exact `x-client-trace-id` Connection nomination receives canonical `400 Request Rejected` framing.
 - **Matching is case-insensitive.** Mixed-case exact nominations are rejected.
-- **Substring lookalikes remain outside this rule.** `x-request-id-x` remains valid when otherwise admissible.
-- **Values remain opaque at this layer.** This containment examines only Connection option names and does not validate UUID syntax or reinterpret request IDs. Envoy's HTTP connection manager generates `X-Request-ID` by default when absent and may replace externally supplied edge values unless configured to preserve them; the resulting ID is used for request identity, tracing, and logging.
+- **Substring lookalikes remain outside this rule.** `x-client-trace-id-x` remains valid when otherwise admissible.
+- **Values remain opaque at this layer.** This containment examines only Connection option names and does not validate UUID syntax or reinterpret trace identifiers. Envoy's HTTP connection manager treats an external `X-Client-Trace-ID` as client-requested tracing metadata, joining it with the internally generated `X-Request-ID`; client tracing remains subject to the configured client sampling policy.
 - **HTTP/1.0 and HTTP/1.1 are covered.**
-- **Earlier gates retain precedence.** The complete inherited framing, credential, forwarding/client-address, Envoy timeout/retry/hedging, retriable-header/status, alt-stat, timeout-alt-response, timeout-retry-provenance, original-host, upstream-stream-duration, downstream-service-cluster/node, force-trace, IP-tags, and XFCC gates run before this layer.
+- **Earlier gates retain precedence.** The complete inherited framing, credential, forwarding/client-address, Envoy timeout/retry/hedging, retriable-header/status, alt-stat, timeout-alt-response, timeout-retry-provenance, original-host, upstream-stream-duration, downstream-service-cluster/node, force-trace, IP-tags, XFCC, and request-ID gates run before this layer.
 - **Expect handling remains canonical.** Requests carrying `Expect` still terminate through the inherited `417 Request Rejected` path with no interim `100 Continue`.
 - **HEAD rejection remains bodyless.** Representation `Content-Length` is preserved without sending the rejection body.
 - **Pipeline and runtime isolation remain intact.** Rejected requests cannot dispatch trailing pipelined bytes or invoke readiness/metrics evaluation.
 - **Admission capacity recovers normally.** Rejection releases its bounded worker slot.
 - **Ingress budgets are unchanged.** 8 KiB request line, 32 KiB aggregate headers, 32 fields, 5-second idle timeout, 5-second absolute header deadline, 32 concurrent requests.
-- **The live operator now uses `http_v166666666633112345675678`.** The live runtime remains `runtime_v1664`.
+- **The live operator now uses `http_v1666666666331123456756781`.** The live runtime remains `runtime_v1664`.
 - **Checkpoint persistence, Prometheus schema, RBAC, readiness policy, and NVIDIA mutation behavior are unchanged.**
 
 ## Ingress resource model
@@ -31,7 +31,7 @@
 5. `max_request_header_bytes` — default 32768 bytes.
 6. `max_request_header_fields` — default 32 fields.
 
-Protocol invariants remain fail-closed in the inherited order: request framing and target syntax; header grammar and value-octet containment; `Expect`; upgrade/Trailer/TE/Proxy-Connection; canonical Connection parsing/lifecycle/critical nomination/duplication/singleton enforcement; Keep-Alive/HTTP2-Settings/WebSocket/Proxy-Authorization; Authorization/Cookie/Forwarded and forwarding/client-IP nomination containment; Envoy external/original/internal/attempt/decorator/timeout metadata; `X-Envoy-Retry-On`; `X-Envoy-Retry-Grpc-On`; `X-Envoy-Max-Retries`; `X-Envoy-Hedge-On-Per-Try-Timeout`; `X-Envoy-Retriable-Header-Names`; `X-Envoy-Retriable-Status-Codes`; `X-Envoy-Upstream-Alt-Stat-Name`; `X-Envoy-Upstream-Rq-Timeout-Alt-Response`; `X-Envoy-Is-Timeout-Retry`; `X-Envoy-Original-Host`; `X-Envoy-Upstream-Stream-Duration-Ms`; `X-Envoy-Downstream-Service-Cluster`; `X-Envoy-Downstream-Service-Node`; `X-Envoy-Force-Trace`; `X-Envoy-IP-Tags`; `X-Forwarded-Client-Cert`; then `X-Request-ID`.
+Protocol invariants remain fail-closed in the inherited order: request framing and target syntax; header grammar and value-octet containment; `Expect`; upgrade/Trailer/TE/Proxy-Connection; canonical Connection parsing/lifecycle/critical nomination/duplication/singleton enforcement; Keep-Alive/HTTP2-Settings/WebSocket/Proxy-Authorization; Authorization/Cookie/Forwarded and forwarding/client-IP nomination containment; Envoy external/original/internal/attempt/decorator/timeout metadata; `X-Envoy-Retry-On`; `X-Envoy-Retry-Grpc-On`; `X-Envoy-Max-Retries`; `X-Envoy-Hedge-On-Per-Try-Timeout`; `X-Envoy-Retriable-Header-Names`; `X-Envoy-Retriable-Status-Codes`; `X-Envoy-Upstream-Alt-Stat-Name`; `X-Envoy-Upstream-Rq-Timeout-Alt-Response`; `X-Envoy-Is-Timeout-Retry`; `X-Envoy-Original-Host`; `X-Envoy-Upstream-Stream-Duration-Ms`; `X-Envoy-Downstream-Service-Cluster`; `X-Envoy-Downstream-Service-Node`; `X-Envoy-Force-Trace`; `X-Envoy-IP-Tags`; `X-Forwarded-Client-Cert`; `X-Request-ID`; then `X-Client-Trace-ID`.
 
 ## Safety invariants
 
@@ -109,11 +109,12 @@ Protocol invariants remain fail-closed in the inherited order: request framing a
 72. Exact `x-envoy-ip-tags` nomination is rejected; ordinary `X-Envoy-IP-Tags` remains admissible when otherwise valid.
 73. Exact `x-forwarded-client-cert` nomination is rejected; ordinary `X-Forwarded-Client-Cert` remains admissible when otherwise valid.
 74. Exact `x-request-id` nomination is rejected; ordinary `X-Request-ID` remains admissible when otherwise valid.
-75. HEAD rejection remains bodyless while preserving representation `Content-Length`.
-76. Rejected requests cannot process trailing pipelined bytes on the same connection.
-77. Rejection releases bounded worker capacity.
-78. Header field-count, aggregate header bytes, and request-line byte budgets remain independently enforced.
-79. Silent and byte-trickle partial requests remain bounded by the inherited idle timeout and absolute parse deadline.
-80. Existing client-abort, parser-error, logging, response-body, resource, and method containment remains unchanged.
-81. All v1.6.5.x checkpoint receipt, reconciliation, and persistence semantics remain unchanged.
-82. NVIDIA driver/GPU Operator resources remain read-only in v1.6.6.6.6.6.6.6.6.6.3.3.1.2.3.4.5.6.7.5.6.7.8.
+75. Exact `x-client-trace-id` nomination is rejected; ordinary `X-Client-Trace-ID` remains admissible when otherwise valid.
+76. HEAD rejection remains bodyless while preserving representation `Content-Length`.
+77. Rejected requests cannot process trailing pipelined bytes on the same connection.
+78. Rejection releases bounded worker capacity.
+79. Header field-count, aggregate header bytes, and request-line byte budgets remain independently enforced.
+80. Silent and byte-trickle partial requests remain bounded by the inherited idle timeout and absolute parse deadline.
+81. Existing client-abort, parser-error, logging, response-body, resource, and method containment remains unchanged.
+82. All v1.6.5.x checkpoint receipt, reconciliation, and persistence semantics remain unchanged.
+83. NVIDIA driver/GPU Operator resources remain read-only in v1.6.6.6.6.6.6.6.6.6.3.3.1.2.3.4.5.6.7.5.6.7.8.1.
