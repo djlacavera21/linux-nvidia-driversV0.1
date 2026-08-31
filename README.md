@@ -1,27 +1,25 @@
-# nvlx: Linux-NVIDIA-Driver v1.6.6.6.6.6.6.6.6.6.2
+# nvlx: Linux-NVIDIA-Driver v1.6.6.6.6.6.6.6.6.6.3
 
-`nvlx` v1.6.6.6.6.6.6.6.6.6.2 adds critical `Connection`-option nomination containment to the live HTTP surface. After the inherited framing, version, Host, request-target, header-syntax, `Expect`, Host-authority, request-line separator, percent-escape, canonical-CRLF, protocol-upgrade, `Trailer`, `TE`, `Proxy-Connection`, canonical `Connection` token-list, and lifecycle-conflict gates succeed, `Connection` options may not nominate critical routing or framing fields as hop-by-hop.
+`nvlx` v1.6.6.6.6.6.6.6.6.6.3 adds duplicate `Connection`-option containment to the live HTTP surface. After the inherited framing, version, Host, request-target, header-syntax, `Expect`, Host-authority, request-line separator, percent-escape, canonical-CRLF, protocol-upgrade, `Trailer`, `TE`, `Proxy-Connection`, canonical `Connection` token-list, lifecycle-conflict, and critical-nomination gates succeed, each remaining `Connection` option may appear only once across the complete field set.
 
 > [!IMPORTANT]
 > NVIDIA driver/GPU Operator resources remain read-only. The operator still mutates only nvlx-owned GPUFleet status/finalizers plus its existing Lease and Events.
 
-## v1.6.6.6.6.6.6.6.6.6.2 critical Connection-option nomination containment
+## v1.6.6.6.6.6.6.6.6.6.3 duplicate Connection-option containment
 
-- **Critical routing/framing fields cannot be reclassified as hop-by-hop.** `Connection` options equal to `host`, `content-length`, `transfer-encoding`, `trailer`, `expect`, or `connection` are terminally rejected.
-- **Matching is case-insensitive.** Mixed-case spellings such as `Connection: HOST` or `Connection: Content-Length` are treated identically.
-- **The rule applies even when the nominated field is otherwise valid.** For example, `Content-Length: 0` remains valid bodyless framing by itself, but `Connection: Content-Length` is rejected.
-- **Self-nomination is rejected.** `Connection: Connection` cannot recursively redefine the semantics of the `Connection` field itself.
-- **Custom extension tokens remain supported.** Tokens such as `x-custom`, `x-host`, and `content-length-x` remain outside this narrow gate.
-- **Existing lifecycle behavior is preserved.** Single `close` or `keep-alive` directives and repeated identical lifecycle tokens remain valid; contradictory `close` plus `keep-alive` is still rejected by the earlier lifecycle gate.
-- **Earlier policy gates retain precedence.** Malformed Connection syntax, `upgrade`, `te`, `proxy-connection`, `Expect`, framing, version, Host, target, CRLF, and other inherited containment checks still run first.
-- **HTTP/1.0 and HTTP/1.1 are covered.** Critical field nomination is refused under either admitted request version.
-- **Nomination failures use canonical terminal 400 framing.** `Connection: close` on rejection prevents trailing bytes from becoming a pipelined follow-on request.
+- **Each Connection option is unique across the request.** Repeating the same option in one field or across multiple `Connection` fields is terminally rejected.
+- **Duplicate matching is case-insensitive.** `x-custom` and `X-CUSTOM` are the same option for duplicate detection.
+- **Lifecycle duplicates are no longer admitted.** `close, close` and `keep-alive, KEEP-ALIVE` now fail closed rather than relying on intermediary duplicate collapsing.
+- **Custom options remain supported when unique.** Distinct extensions such as `x-one, x-two` remain admitted.
+- **All earlier Connection gates retain precedence.** Malformed token lists, contradictory `close` plus `keep-alive`, critical field nomination, `upgrade`, `te`, and `proxy-connection` are still rejected by their inherited layers first.
+- **HTTP/1.0 and HTTP/1.1 are covered.** Duplicate connection options are refused under either admitted request version.
+- **Duplicate failures use canonical terminal 400 framing.** `Connection: close` on rejection prevents trailing bytes from becoming a pipelined follow-on request.
 - **The canonical Expect contract remains intact.** A request that also carries `Expect` is rejected by the earlier `417 Request Rejected` gate and emits no interim `100 Continue` response.
 - **HEAD rejection remains bodyless.** Representation `Content-Length` is preserved without sending the rejection body.
-- **Runtime/endpoint evaluation remains isolated.** Critical Connection nomination cannot invoke readiness or metrics diagnosis.
+- **Runtime/endpoint evaluation remains isolated.** Duplicate Connection options cannot invoke readiness or metrics diagnosis.
 - **Admission capacity recovers normally.** Rejection releases its bounded worker slot.
 - **Existing ingress defenses remain intact.** The 8 KiB request-line budget, 32 KiB aggregate header budget, 32-field header cap, 5-second idle timeout, 5-second absolute header deadline, and 32-request admission cap are unchanged.
-- **The live operator now uses `http_v16666666662`.** The live runtime remains `runtime_v1664`.
+- **The live operator now uses `http_v16666666663`.** The live runtime remains `runtime_v1664`.
 - **Checkpoint persistence, Prometheus schema, RBAC, readiness policy, and NVIDIA mutation behavior are unchanged.**
 
 ## Ingress resource model
@@ -35,7 +33,7 @@ The live server retains six independent quantitative ingress bounds:
 5. `max_request_header_bytes` — aggregate request-header byte budget, default 32768 bytes.
 6. `max_request_header_fields` — request-header field-count budget, default 32 fields.
 
-The quantitative budgets remain independent. Protocol invariants are enforced in a fail-closed chain: bodyless framing, exact HTTP/1.0 or HTTP/1.1 request version, HTTP/1.1 singleton Host framing, canonical origin-form request-target containment, obsolete folded-header rejection, strict request-header field-name grammar, strict request-header field-value octets, request-expectation rejection, strict HTTP/1.1 Host authority syntax, canonical request-line separator containment, malformed percent-escape rejection, canonical CRLF request/header line endings, protocol-upgrade containment, request `Trailer` declaration containment, request `TE` negotiation containment, `Proxy-Connection` containment, canonical `Connection` token-list containment, `Connection` lifecycle conflict containment, then critical `Connection`-option nomination containment.
+The quantitative budgets remain independent. Protocol invariants are enforced in a fail-closed chain: bodyless framing, exact HTTP/1.0 or HTTP/1.1 request version, HTTP/1.1 singleton Host framing, canonical origin-form request-target containment, obsolete folded-header rejection, strict request-header field-name grammar, strict request-header field-value octets, request-expectation rejection, strict HTTP/1.1 Host authority syntax, canonical request-line separator containment, malformed percent-escape rejection, canonical CRLF request/header line endings, protocol-upgrade containment, request `Trailer` declaration containment, request `TE` negotiation containment, `Proxy-Connection` containment, canonical `Connection` token-list containment, `Connection` lifecycle conflict containment, critical `Connection`-option nomination containment, then duplicate `Connection`-option containment.
 
 ## Safety invariants
 
@@ -58,11 +56,12 @@ The quantitative budgets remain independent. Protocol invariants are enforced in
 17. Every remaining `Connection` field must be a non-empty comma-separated list of ASCII HTTP tokens; malformed lists are terminally rejected.
 18. Requests that advertise both `close` and `keep-alive` across canonical Connection fields are terminally rejected.
 19. `Connection` options may not nominate `host`, `content-length`, `transfer-encoding`, `trailer`, `expect`, or `connection` as hop-by-hop fields.
-20. HEAD rejection remains bodyless while preserving representation `Content-Length`.
-21. Rejected requests cannot process trailing pipelined bytes on the same connection.
-22. Rejection releases bounded worker capacity.
-23. Header field-count, aggregate header bytes, and request-line byte budgets remain independently enforced.
-24. Silent and byte-trickle partial requests remain bounded by the inherited idle timeout and absolute parse deadline.
-25. Existing client-abort, parser-error, logging, response-body, resource, and method containment remains unchanged.
-26. All v1.6.5.x checkpoint receipt, reconciliation, and persistence semantics remain unchanged.
-27. NVIDIA driver/GPU Operator resources remain read-only in v1.6.6.6.6.6.6.6.6.6.2.
+20. Each remaining `Connection` option may appear only once across all Connection fields, case-insensitively.
+21. HEAD rejection remains bodyless while preserving representation `Content-Length`.
+22. Rejected requests cannot process trailing pipelined bytes on the same connection.
+23. Rejection releases bounded worker capacity.
+24. Header field-count, aggregate header bytes, and request-line byte budgets remain independently enforced.
+25. Silent and byte-trickle partial requests remain bounded by the inherited idle timeout and absolute parse deadline.
+26. Existing client-abort, parser-error, logging, response-body, resource, and method containment remains unchanged.
+27. All v1.6.5.x checkpoint receipt, reconciliation, and persistence semantics remain unchanged.
+28. NVIDIA driver/GPU Operator resources remain read-only in v1.6.6.6.6.6.6.6.6.6.3.
