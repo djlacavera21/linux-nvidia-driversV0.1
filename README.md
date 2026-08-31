@@ -1,26 +1,26 @@
-# nvlx: Linux-NVIDIA-Driver v1.6.6.6.6.6.6.6.6.6.3.3.1.2.3
+# nvlx: Linux-NVIDIA-Driver v1.6.6.6.6.6.6.6.6.6.3.3.1.2.3.1
 
-`nvlx` v1.6.6.6.6.6.6.6.6.6.3.3.1.2.3 adds `Forwarded` Connection-nomination containment to the live HTTP surface. After the inherited framing, version, Host, request-target, header-syntax, `Expect`, Host-authority, request-line separator, percent-escape, canonical-CRLF, protocol-upgrade, `Trailer`, `TE`, `Proxy-Connection`, canonical `Connection` token-list, lifecycle-conflict, critical-nomination, duplicate-option, singleton-Connection-field, `Keep-Alive`, `HTTP2-Settings`, WebSocket-metadata, `Proxy-Authorization`, `Authorization` nomination, and `Cookie` nomination gates succeed, the server rejects any exact `forwarded` Connection option before endpoint or runtime evaluation while continuing to admit ordinary `Forwarded` fields.
+`nvlx` v1.6.6.6.6.6.6.6.6.6.3.3.1.2.3.1 adds `X-Forwarded-For` Connection-nomination containment to the live HTTP surface. After the inherited framing, version, Host, request-target, header-syntax, `Expect`, Host-authority, request-line separator, percent-escape, canonical-CRLF, protocol-upgrade, `Trailer`, `TE`, `Proxy-Connection`, canonical `Connection` token-list, lifecycle-conflict, critical-nomination, duplicate-option, singleton-Connection-field, `Keep-Alive`, `HTTP2-Settings`, WebSocket-metadata, `Proxy-Authorization`, `Authorization` nomination, `Cookie` nomination, and `Forwarded` nomination gates succeed, the server rejects any exact `x-forwarded-for` Connection option before endpoint or runtime evaluation while continuing to admit ordinary `X-Forwarded-For` fields.
 
 > [!IMPORTANT]
 > NVIDIA driver/GPU Operator resources remain read-only. The operator still mutates only nvlx-owned GPUFleet status/finalizers plus its existing Lease and Events.
 
-## v1.6.6.6.6.6.6.6.6.6.3.3.1.2.3 Forwarded Connection-nomination containment
+## v1.6.6.6.6.6.6.6.6.6.3.3.1.2.3.1 X-Forwarded-For Connection-nomination containment
 
-- **Forwarded remains end-to-end.** A normal request `Forwarded` field remains admissible when all inherited gates accept it.
-- **Hop-by-hop demotion is terminal.** An exact `forwarded` Connection option is rejected through canonical `400 Request Rejected` framing.
-- **Matching is case-insensitive.** `Connection: Forwarded` and mixed-case variants are rejected.
-- **Substring lookalikes remain outside this rule.** Options such as `forwarded-x` remain valid when otherwise admissible.
-- **Forwarded values are opaque.** This layer examines only Connection option names and does not interpret, log, split, decode, or normalize `Forwarded` values.
-- **HTTP/1.0 and HTTP/1.1 are covered.** Forwarded nomination is refused under either admitted request version.
-- **Earlier gates retain precedence.** `Expect`, `Upgrade`, `HTTP2-Settings`, WebSocket metadata, `Keep-Alive`, `Proxy-Authorization`, `Authorization` nomination, `Cookie` nomination, malformed Connection lists, lifecycle conflicts, critical nomination, duplicate options, repeated Connection fields, `TE`, and `Proxy-Connection` still run before this layer.
+- **X-Forwarded-For remains end-to-end.** A normal request `X-Forwarded-For` field remains admissible when all inherited gates accept it.
+- **Hop-by-hop demotion is terminal.** An exact `x-forwarded-for` Connection option is rejected through canonical `400 Request Rejected` framing.
+- **Matching is case-insensitive.** `Connection: X-Forwarded-For` and mixed-case variants are rejected.
+- **Substring lookalikes remain outside this rule.** Options such as `x-forwarded-for-x` remain valid when otherwise admissible.
+- **X-Forwarded-For values are opaque.** This layer examines only Connection option names and does not interpret, log, split, validate, normalize, or trust `X-Forwarded-For` values.
+- **HTTP/1.0 and HTTP/1.1 are covered.** X-Forwarded-For nomination is refused under either admitted request version.
+- **Earlier gates retain precedence.** `Expect`, `Upgrade`, `HTTP2-Settings`, WebSocket metadata, `Keep-Alive`, `Proxy-Authorization`, `Authorization` nomination, `Cookie` nomination, `Forwarded` nomination, malformed Connection lists, lifecycle conflicts, critical nomination, duplicate options, repeated Connection fields, `TE`, and `Proxy-Connection` still run before this layer.
 - **The canonical Expect contract remains intact.** A request that also carries `Expect` is rejected by the earlier `417 Request Rejected` gate and emits no interim `100 Continue` response.
-- **Forwarded-nomination failures use canonical terminal 400 framing.** Rejection closes the connection so trailing bytes cannot become a pipelined follow-on request.
+- **X-Forwarded-For-nomination failures use canonical terminal 400 framing.** Rejection closes the connection so trailing bytes cannot become a pipelined follow-on request.
 - **HEAD rejection remains bodyless.** Representation `Content-Length` is preserved without sending the rejection body.
-- **Runtime/endpoint evaluation remains isolated.** Forwarded nomination cannot invoke readiness or metrics diagnosis.
+- **Runtime/endpoint evaluation remains isolated.** X-Forwarded-For nomination cannot invoke readiness or metrics diagnosis.
 - **Admission capacity recovers normally.** Rejection releases its bounded worker slot.
 - **Existing ingress defenses remain intact.** The 8 KiB request-line budget, 32 KiB aggregate header budget, 32-field header cap, 5-second idle timeout, 5-second absolute header deadline, and 32-request admission cap are unchanged.
-- **The live operator now uses `http_v1666666666331123`.** The live runtime remains `runtime_v1664`.
+- **The live operator now uses `http_v16666666663311231`.** The live runtime remains `runtime_v1664`.
 - **Checkpoint persistence, Prometheus schema, RBAC, readiness policy, and NVIDIA mutation behavior are unchanged.**
 
 ## Ingress resource model
@@ -34,7 +34,7 @@ The live server retains six independent quantitative ingress bounds:
 5. `max_request_header_bytes` — aggregate request-header byte budget, default 32768 bytes.
 6. `max_request_header_fields` — request-header field-count budget, default 32 fields.
 
-The quantitative budgets remain independent. Protocol invariants are enforced in a fail-closed chain: bodyless framing, exact HTTP/1.0 or HTTP/1.1 request version, HTTP/1.1 singleton Host framing, canonical origin-form request-target containment, obsolete folded-header rejection, strict request-header field-name grammar, strict request-header field-value octets, request-expectation rejection, strict HTTP/1.1 Host authority syntax, canonical request-line separator containment, malformed percent-escape rejection, canonical CRLF request/header line endings, protocol-upgrade containment, request `Trailer` declaration containment, request `TE` negotiation containment, `Proxy-Connection` containment, canonical `Connection` token-list containment, `Connection` lifecycle conflict containment, critical `Connection`-option nomination containment, duplicate `Connection`-option containment, singleton `Connection`-field containment, request `Keep-Alive` field containment, `HTTP2-Settings` request containment, WebSocket handshake-metadata containment, `Proxy-Authorization` credential-channel containment, `Authorization` Connection-nomination containment, `Cookie` Connection-nomination containment, then `Forwarded` Connection-nomination containment.
+The quantitative budgets remain independent. Protocol invariants are enforced in a fail-closed chain: bodyless framing, exact HTTP/1.0 or HTTP/1.1 request version, HTTP/1.1 singleton Host framing, canonical origin-form request-target containment, obsolete folded-header rejection, strict request-header field-name grammar, strict request-header field-value octets, request-expectation rejection, strict HTTP/1.1 Host authority syntax, canonical request-line separator containment, malformed percent-escape rejection, canonical CRLF request/header line endings, protocol-upgrade containment, request `Trailer` declaration containment, request `TE` negotiation containment, `Proxy-Connection` containment, canonical `Connection` token-list containment, `Connection` lifecycle conflict containment, critical `Connection`-option nomination containment, duplicate `Connection`-option containment, singleton `Connection`-field containment, request `Keep-Alive` field containment, `HTTP2-Settings` request containment, WebSocket handshake-metadata containment, `Proxy-Authorization` credential-channel containment, `Authorization` Connection-nomination containment, `Cookie` Connection-nomination containment, `Forwarded` Connection-nomination containment, then `X-Forwarded-For` Connection-nomination containment.
 
 ## Safety invariants
 
@@ -66,11 +66,12 @@ The quantitative budgets remain independent. Protocol invariants are enforced in
 26. An exact `authorization` Connection option is terminally rejected; an ordinary `Authorization` field remains end-to-end and admissible when otherwise valid.
 27. An exact `cookie` Connection option is terminally rejected; an ordinary `Cookie` field remains end-to-end and admissible when otherwise valid.
 28. An exact `forwarded` Connection option is terminally rejected; an ordinary `Forwarded` field remains end-to-end and admissible when otherwise valid.
-29. HEAD rejection remains bodyless while preserving representation `Content-Length`.
-30. Rejected requests cannot process trailing pipelined bytes on the same connection.
-31. Rejection releases bounded worker capacity.
-32. Header field-count, aggregate header bytes, and request-line byte budgets remain independently enforced.
-33. Silent and byte-trickle partial requests remain bounded by the inherited idle timeout and absolute parse deadline.
-34. Existing client-abort, parser-error, logging, response-body, resource, and method containment remains unchanged.
-35. All v1.6.5.x checkpoint receipt, reconciliation, and persistence semantics remain unchanged.
-36. NVIDIA driver/GPU Operator resources remain read-only in v1.6.6.6.6.6.6.6.6.6.3.3.1.2.3.
+29. An exact `x-forwarded-for` Connection option is terminally rejected; an ordinary `X-Forwarded-For` field remains end-to-end and admissible when otherwise valid.
+30. HEAD rejection remains bodyless while preserving representation `Content-Length`.
+31. Rejected requests cannot process trailing pipelined bytes on the same connection.
+32. Rejection releases bounded worker capacity.
+33. Header field-count, aggregate header bytes, and request-line byte budgets remain independently enforced.
+34. Silent and byte-trickle partial requests remain bounded by the inherited idle timeout and absolute parse deadline.
+35. Existing client-abort, parser-error, logging, response-body, resource, and method containment remains unchanged.
+36. All v1.6.5.x checkpoint receipt, reconciliation, and persistence semantics remain unchanged.
+37. NVIDIA driver/GPU Operator resources remain read-only in v1.6.6.6.6.6.6.6.6.6.3.3.1.2.3.1.
