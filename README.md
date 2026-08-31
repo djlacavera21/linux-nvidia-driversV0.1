@@ -1,25 +1,25 @@
-# nvlx: Linux-NVIDIA-Driver v1.6.6.6.6.6.6.6.6.6.3.3.1.2.3.4.5.6.7.5.6.7.8.5.1.2.3.1
+# nvlx: Linux-NVIDIA-Driver v1.6.6.6.6.6.6.6.6.6.3.3.1.2.3.4.5.6.7.5.6.7.8.5.1.2.3.2
 
-`nvlx` v1.6.6.6.6.6.6.6.6.6.3.3.1.2.3.4.5.6.7.5.6.7.8.5.1.2.3.1 adds `SW8` Connection-nomination containment to the live HTTP surface. After inherited ingress and tracing/proxy-metadata gates succeed, the server rejects an exact `sw8` Connection option before endpoint/runtime evaluation while continuing to admit ordinary `SW8` fields.
+`nvlx` v1.6.6.6.6.6.6.6.6.6.3.3.1.2.3.4.5.6.7.5.6.7.8.5.1.2.3.2 adds `X-Amzn-Trace-Id` Connection-nomination containment to the live HTTP surface. After inherited ingress and tracing/proxy-metadata gates succeed, the server rejects an exact `x-amzn-trace-id` Connection option before endpoint/runtime evaluation while continuing to admit ordinary `X-Amzn-Trace-Id` fields.
 
 > [!IMPORTANT]
 > NVIDIA driver/GPU Operator resources remain read-only. The operator still mutates only nvlx-owned GPUFleet status/finalizers plus its existing Lease and Events.
 
-## v1.6.6.6.6.6.6.6.6.6.3.3.1.2.3.4.5.6.7.5.6.7.8.5.1.2.3.1 SW8 Connection-nomination containment
+## v1.6.6.6.6.6.6.6.6.6.3.3.1.2.3.4.5.6.7.5.6.7.8.5.1.2.3.2 X-Amzn-Trace-Id Connection-nomination containment
 
-- **Ordinary SkyWalking tracing context remains admissible.** `SW8` is accepted when all inherited gates accept the request.
-- **Hop-by-hop demotion is terminal.** Exact `sw8` Connection nomination receives canonical `400 Request Rejected` framing.
-- **Matching is case-insensitive.** `SW8`, `Sw8`, and other exact case variants are rejected.
-- **Substring lookalikes remain outside this rule.** `sw8-x` remains valid when otherwise admissible.
-- **Values remain opaque at this layer.** This containment examines only Connection option names and does not validate or reinterpret SkyWalking context. Envoy documents `sw8` as the key tracing context used by its SkyWalking tracer to establish relationships between downstream spans and Envoy.
+- **Ordinary AWS X-Ray tracing context remains admissible.** `X-Amzn-Trace-Id` is accepted when all inherited gates accept the request.
+- **Hop-by-hop demotion is terminal.** Exact `x-amzn-trace-id` Connection nomination receives canonical `400 Request Rejected` framing.
+- **Matching is case-insensitive.** Mixed-case exact nominations are rejected.
+- **Substring lookalikes remain outside this rule.** `x-amzn-trace-id-x` remains valid when otherwise admissible.
+- **Values remain opaque at this layer.** This containment examines only Connection option names and does not validate or reinterpret AWS X-Ray context. Envoy documents `X-Amzn-Trace-Id` as the AWS X-Ray tracing header carrying trace ID, parent ID, and sampling-decision data.
 - **HTTP/1.0 and HTTP/1.1 are covered.**
-- **Earlier gates retain precedence.** The complete inherited framing, credential, forwarding/client-address, Envoy timeout/retry/hedging, retriable-header/status, alt-stat, timeout-alt-response, timeout-retry-provenance, original-host, upstream-stream-duration, downstream-service-cluster/node, force-trace, IP-tags, XFCC, request-ID, client-trace-ID, OT-span-context, B3 trace-ID, B3 span-ID, B3 parent-span-ID, B3 sampled, B3 flags, compressed B3, Datadog trace-ID, Datadog parent-ID, and Datadog sampling-priority gates run before this layer.
+- **Earlier gates retain precedence.** The complete inherited framing, credential, forwarding/client-address, Envoy timeout/retry/hedging, retriable-header/status, alt-stat, timeout-alt-response, timeout-retry-provenance, original-host, upstream-stream-duration, downstream-service-cluster/node, force-trace, IP-tags, XFCC, request-ID, client-trace-ID, OT-span-context, B3 trace-ID, B3 span-ID, B3 parent-span-ID, B3 sampled, B3 flags, compressed B3, Datadog trace-ID, Datadog parent-ID, Datadog sampling-priority, and SW8 gates run before this layer.
 - **Expect handling remains canonical.** Requests carrying `Expect` still terminate through the inherited `417 Request Rejected` path with no interim `100 Continue`.
 - **HEAD rejection remains bodyless.** Representation `Content-Length` is preserved without sending the rejection body.
 - **Pipeline and runtime isolation remain intact.** Rejected requests cannot dispatch trailing pipelined bytes or invoke readiness/metrics evaluation.
 - **Admission capacity recovers normally.** Rejection releases its bounded worker slot.
 - **Ingress budgets are unchanged.** 8 KiB request line, 32 KiB aggregate headers, 32 fields, 5-second idle timeout, 5-second absolute header deadline, 32 concurrent requests.
-- **The live operator now uses `http_v16666666663311234567567851231`.** The live runtime remains `runtime_v1664`.
+- **The live operator now uses `http_v16666666663311234567567851232`.** The live runtime remains `runtime_v1664`.
 - **Checkpoint persistence, Prometheus schema, RBAC, readiness policy, and NVIDIA mutation behavior are unchanged.**
 
 ## Ingress resource model
@@ -31,7 +31,7 @@
 5. `max_request_header_bytes` — default 32768 bytes.
 6. `max_request_header_fields` — default 32 fields.
 
-Protocol invariants remain fail-closed in the inherited order: request framing and target syntax; header grammar and value-octet containment; `Expect`; upgrade/Trailer/TE/Proxy-Connection; canonical Connection parsing/lifecycle/critical nomination/duplication/singleton enforcement; Keep-Alive/HTTP2-Settings/WebSocket/Proxy-Authorization; Authorization/Cookie/Forwarded and forwarding/client-IP nomination containment; Envoy external/original/internal/attempt/decorator/timeout metadata; `X-Envoy-Retry-On`; `X-Envoy-Retry-Grpc-On`; `X-Envoy-Max-Retries`; `X-Envoy-Hedge-On-Per-Try-Timeout`; `X-Envoy-Retriable-Header-Names`; `X-Envoy-Retriable-Status-Codes`; `X-Envoy-Upstream-Alt-Stat-Name`; `X-Envoy-Upstream-Rq-Timeout-Alt-Response`; `X-Envoy-Is-Timeout-Retry`; `X-Envoy-Original-Host`; `X-Envoy-Upstream-Stream-Duration-Ms`; `X-Envoy-Downstream-Service-Cluster`; `X-Envoy-Downstream-Service-Node`; `X-Envoy-Force-Trace`; `X-Envoy-IP-Tags`; `X-Forwarded-Client-Cert`; `X-Request-ID`; `X-Client-Trace-ID`; `X-OT-Span-Context`; `X-B3-TraceId`; `X-B3-SpanId`; `X-B3-ParentSpanId`; `X-B3-Sampled`; `X-B3-Flags`; `B3`; `X-Datadog-Trace-ID`; `X-Datadog-Parent-ID`; `X-Datadog-Sampling-Priority`; then `SW8`.
+Protocol invariants remain fail-closed in the inherited order: request framing and target syntax; header grammar and value-octet containment; `Expect`; upgrade/Trailer/TE/Proxy-Connection; canonical Connection parsing/lifecycle/critical nomination/duplication/singleton enforcement; Keep-Alive/HTTP2-Settings/WebSocket/Proxy-Authorization; Authorization/Cookie/Forwarded and forwarding/client-IP nomination containment; Envoy external/original/internal/attempt/decorator/timeout metadata; `X-Envoy-Retry-On`; `X-Envoy-Retry-Grpc-On`; `X-Envoy-Max-Retries`; `X-Envoy-Hedge-On-Per-Try-Timeout`; `X-Envoy-Retriable-Header-Names`; `X-Envoy-Retriable-Status-Codes`; `X-Envoy-Upstream-Alt-Stat-Name`; `X-Envoy-Upstream-Rq-Timeout-Alt-Response`; `X-Envoy-Is-Timeout-Retry`; `X-Envoy-Original-Host`; `X-Envoy-Upstream-Stream-Duration-Ms`; `X-Envoy-Downstream-Service-Cluster`; `X-Envoy-Downstream-Service-Node`; `X-Envoy-Force-Trace`; `X-Envoy-IP-Tags`; `X-Forwarded-Client-Cert`; `X-Request-ID`; `X-Client-Trace-ID`; `X-OT-Span-Context`; `X-B3-TraceId`; `X-B3-SpanId`; `X-B3-ParentSpanId`; `X-B3-Sampled`; `X-B3-Flags`; `B3`; `X-Datadog-Trace-ID`; `X-Datadog-Parent-ID`; `X-Datadog-Sampling-Priority`; `SW8`; then `X-Amzn-Trace-Id`.
 
 ## Safety invariants
 
@@ -121,11 +121,12 @@ Protocol invariants remain fail-closed in the inherited order: request framing a
 84. Exact `x-datadog-parent-id` nomination is rejected; ordinary `X-Datadog-Parent-ID` remains admissible when otherwise valid.
 85. Exact `x-datadog-sampling-priority` nomination is rejected; ordinary `X-Datadog-Sampling-Priority` remains admissible when otherwise valid.
 86. Exact `sw8` nomination is rejected; ordinary `SW8` remains admissible when otherwise valid.
-87. HEAD rejection remains bodyless while preserving representation `Content-Length`.
-88. Rejected requests cannot process trailing pipelined bytes on the same connection.
-89. Rejection releases bounded worker capacity.
-90. Header field-count, aggregate header bytes, and request-line byte budgets remain independently enforced.
-91. Silent and byte-trickle partial requests remain bounded by the inherited idle timeout and absolute parse deadline.
-92. Existing client-abort, parser-error, logging, response-body, resource, and method containment remains unchanged.
-93. All v1.6.5.x checkpoint receipt, reconciliation, and persistence semantics remain unchanged.
-94. NVIDIA driver/GPU Operator resources remain read-only in v1.6.6.6.6.6.6.6.6.6.3.3.1.2.3.4.5.6.7.5.6.7.8.5.1.2.3.1.
+87. Exact `x-amzn-trace-id` nomination is rejected; ordinary `X-Amzn-Trace-Id` remains admissible when otherwise valid.
+88. HEAD rejection remains bodyless while preserving representation `Content-Length`.
+89. Rejected requests cannot process trailing pipelined bytes on the same connection.
+90. Rejection releases bounded worker capacity.
+91. Header field-count, aggregate header bytes, and request-line byte budgets remain independently enforced.
+92. Silent and byte-trickle partial requests remain bounded by the inherited idle timeout and absolute parse deadline.
+93. Existing client-abort, parser-error, logging, response-body, resource, and method containment remains unchanged.
+94. All v1.6.5.x checkpoint receipt, reconciliation, and persistence semantics remain unchanged.
+95. NVIDIA driver/GPU Operator resources remain read-only in v1.6.6.6.6.6.6.6.6.6.3.3.1.2.3.4.5.6.7.5.6.7.8.5.1.2.3.2.
