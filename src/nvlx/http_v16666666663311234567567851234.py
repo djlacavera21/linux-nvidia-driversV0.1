@@ -8,7 +8,7 @@ from .http_v16666666663311234567567851233 import (
 
 
 def _request_tracestate_nomination_is_safe(headers) -> bool:
-    """Reject exact Connection nominations of W3C Tracestate tracing context."""
+    """Reject exact Connection nominations of W3C Tracestate propagation context."""
     if not _request_traceparent_nomination_is_safe(headers):
         return False
 

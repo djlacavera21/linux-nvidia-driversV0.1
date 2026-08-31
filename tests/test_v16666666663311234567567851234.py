@@ -16,7 +16,7 @@ class _MetricsRuntime:
 
     def metrics_diagnosis(self):
         self.calls += 1
-        raise RuntimeError("should not be reached for Tracestate-nomination requests")
+        raise RuntimeError("should not be reached for Tracestate Connection-nomination requests")
 
 
 class TracestateConnectionNominationContainmentTests(unittest.TestCase):
