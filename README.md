@@ -1,25 +1,25 @@
-# nvlx: Linux-NVIDIA-Driver v1.6.6.6.6.6.6.6.6.6.3.3.1.2.3.4.5.6.7.5.6.7.3
+# nvlx: Linux-NVIDIA-Driver v1.6.6.6.6.6.6.6.6.6.3.3.1.2.3.4.5.6.7.5.6.7.4
 
-`nvlx` v1.6.6.6.6.6.6.6.6.6.3.3.1.2.3.4.5.6.7.5.6.7.3 adds `X-Envoy-Downstream-Service-Cluster` Connection-nomination containment to the live HTTP surface. After inherited ingress and proxy-metadata gates succeed, the server rejects an exact `x-envoy-downstream-service-cluster` Connection option before endpoint/runtime evaluation while continuing to admit ordinary `X-Envoy-Downstream-Service-Cluster` fields.
+`nvlx` v1.6.6.6.6.6.6.6.6.6.3.3.1.2.3.4.5.6.7.5.6.7.4 adds `X-Envoy-Downstream-Service-Node` Connection-nomination containment to the live HTTP surface. After inherited ingress and proxy-metadata gates succeed, the server rejects an exact `x-envoy-downstream-service-node` Connection option before endpoint/runtime evaluation while continuing to admit ordinary `X-Envoy-Downstream-Service-Node` fields.
 
 > [!IMPORTANT]
 > NVIDIA driver/GPU Operator resources remain read-only. The operator still mutates only nvlx-owned GPUFleet status/finalizers plus its existing Lease and Events.
 
-## v1.6.6.6.6.6.6.6.6.6.3.3.1.2.3.4.5.6.7.5.6.7.3 X-Envoy-Downstream-Service-Cluster Connection-nomination containment
+## v1.6.6.6.6.6.6.6.6.6.3.3.1.2.3.4.5.6.7.5.6.7.4 X-Envoy-Downstream-Service-Node Connection-nomination containment
 
-- **Ordinary caller-cluster metadata remains admissible.** `X-Envoy-Downstream-Service-Cluster` is accepted when all inherited gates accept the request.
-- **Hop-by-hop demotion is terminal.** Exact `x-envoy-downstream-service-cluster` Connection nomination receives canonical `400 Request Rejected` framing.
+- **Ordinary caller-node metadata remains admissible.** `X-Envoy-Downstream-Service-Node` is accepted when all inherited gates accept the request.
+- **Hop-by-hop demotion is terminal.** Exact `x-envoy-downstream-service-node` Connection nomination receives canonical `400 Request Rejected` framing.
 - **Matching is case-insensitive.** Mixed-case exact nominations are rejected.
-- **Substring lookalikes remain outside this rule.** `x-envoy-downstream-service-cluster-x` remains valid when otherwise admissible.
-- **Values remain opaque at this layer.** This containment examines only Connection option names. Envoy sanitizes this header on external requests; for internal requests it carries caller service-cluster metadata and should be treated as a caller-supplied hint rather than authenticated identity.
+- **Substring lookalikes remain outside this rule.** `x-envoy-downstream-service-node-x` remains valid when otherwise admissible.
+- **Values remain opaque at this layer.** This containment examines only Connection option names. Envoy describes the field as downstream-node metadata analogous to `X-Envoy-Downstream-Service-Cluster`, with its value sourced from `--service-node`.
 - **HTTP/1.0 and HTTP/1.1 are covered.**
-- **Earlier gates retain precedence.** The complete inherited framing, credential, forwarding/client-address, Envoy timeout/retry/hedging, retriable-header/status, alt-stat, timeout-alt-response, timeout-retry-provenance, original-host, and upstream-stream-duration gates run before this layer.
+- **Earlier gates retain precedence.** The complete inherited framing, credential, forwarding/client-address, Envoy timeout/retry/hedging, retriable-header/status, alt-stat, timeout-alt-response, timeout-retry-provenance, original-host, upstream-stream-duration, and downstream-service-cluster gates run before this layer.
 - **Expect handling remains canonical.** Requests carrying `Expect` still terminate through the inherited `417 Request Rejected` path with no interim `100 Continue`.
 - **HEAD rejection remains bodyless.** Representation `Content-Length` is preserved without sending the rejection body.
 - **Pipeline and runtime isolation remain intact.** Rejected requests cannot dispatch trailing pipelined bytes or invoke readiness/metrics evaluation.
 - **Admission capacity recovers normally.** Rejection releases its bounded worker slot.
 - **Ingress budgets are unchanged.** 8 KiB request line, 32 KiB aggregate headers, 32 fields, 5-second idle timeout, 5-second absolute header deadline, 32 concurrent requests.
-- **The live operator now uses `http_v166666666633112345675673`.** The live runtime remains `runtime_v1664`.
+- **The live operator now uses `http_v166666666633112345675674`.** The live runtime remains `runtime_v1664`.
 - **Checkpoint persistence, Prometheus schema, RBAC, readiness policy, and NVIDIA mutation behavior are unchanged.**
 
 ## Ingress resource model
@@ -31,7 +31,7 @@
 5. `max_request_header_bytes` — default 32768 bytes.
 6. `max_request_header_fields` — default 32 fields.
 
-Protocol invariants remain fail-closed in the inherited order: request framing and target syntax; header grammar and value-octet containment; `Expect`; upgrade/Trailer/TE/Proxy-Connection; canonical Connection parsing/lifecycle/critical nomination/duplication/singleton enforcement; Keep-Alive/HTTP2-Settings/WebSocket/Proxy-Authorization; Authorization/Cookie/Forwarded and forwarding/client-IP nomination containment; Envoy external/original/internal/attempt/decorator/timeout metadata; `X-Envoy-Retry-On`; `X-Envoy-Retry-Grpc-On`; `X-Envoy-Max-Retries`; `X-Envoy-Hedge-On-Per-Try-Timeout`; `X-Envoy-Retriable-Header-Names`; `X-Envoy-Retriable-Status-Codes`; `X-Envoy-Upstream-Alt-Stat-Name`; `X-Envoy-Upstream-Rq-Timeout-Alt-Response`; `X-Envoy-Is-Timeout-Retry`; `X-Envoy-Original-Host`; `X-Envoy-Upstream-Stream-Duration-Ms`; then `X-Envoy-Downstream-Service-Cluster`.
+Protocol invariants remain fail-closed in the inherited order: request framing and target syntax; header grammar and value-octet containment; `Expect`; upgrade/Trailer/TE/Proxy-Connection; canonical Connection parsing/lifecycle/critical nomination/duplication/singleton enforcement; Keep-Alive/HTTP2-Settings/WebSocket/Proxy-Authorization; Authorization/Cookie/Forwarded and forwarding/client-IP nomination containment; Envoy external/original/internal/attempt/decorator/timeout metadata; `X-Envoy-Retry-On`; `X-Envoy-Retry-Grpc-On`; `X-Envoy-Max-Retries`; `X-Envoy-Hedge-On-Per-Try-Timeout`; `X-Envoy-Retriable-Header-Names`; `X-Envoy-Retriable-Status-Codes`; `X-Envoy-Upstream-Alt-Stat-Name`; `X-Envoy-Upstream-Rq-Timeout-Alt-Response`; `X-Envoy-Is-Timeout-Retry`; `X-Envoy-Original-Host`; `X-Envoy-Upstream-Stream-Duration-Ms`; `X-Envoy-Downstream-Service-Cluster`; then `X-Envoy-Downstream-Service-Node`.
 
 ## Safety invariants
 
@@ -104,11 +104,12 @@ Protocol invariants remain fail-closed in the inherited order: request framing a
 67. Exact `x-envoy-original-host` nomination is rejected; ordinary `X-Envoy-Original-Host` remains admissible when otherwise valid.
 68. Exact `x-envoy-upstream-stream-duration-ms` nomination is rejected; ordinary `X-Envoy-Upstream-Stream-Duration-Ms` remains admissible when otherwise valid.
 69. Exact `x-envoy-downstream-service-cluster` nomination is rejected; ordinary `X-Envoy-Downstream-Service-Cluster` remains admissible when otherwise valid.
-70. HEAD rejection remains bodyless while preserving representation `Content-Length`.
-71. Rejected requests cannot process trailing pipelined bytes on the same connection.
-72. Rejection releases bounded worker capacity.
-73. Header field-count, aggregate header bytes, and request-line byte budgets remain independently enforced.
-74. Silent and byte-trickle partial requests remain bounded by the inherited idle timeout and absolute parse deadline.
-75. Existing client-abort, parser-error, logging, response-body, resource, and method containment remains unchanged.
-76. All v1.6.5.x checkpoint receipt, reconciliation, and persistence semantics remain unchanged.
-77. NVIDIA driver/GPU Operator resources remain read-only in v1.6.6.6.6.6.6.6.6.6.3.3.1.2.3.4.5.6.7.5.6.7.3.
+70. Exact `x-envoy-downstream-service-node` nomination is rejected; ordinary `X-Envoy-Downstream-Service-Node` remains admissible when otherwise valid.
+71. HEAD rejection remains bodyless while preserving representation `Content-Length`.
+72. Rejected requests cannot process trailing pipelined bytes on the same connection.
+73. Rejection releases bounded worker capacity.
+74. Header field-count, aggregate header bytes, and request-line byte budgets remain independently enforced.
+75. Silent and byte-trickle partial requests remain bounded by the inherited idle timeout and absolute parse deadline.
+76. Existing client-abort, parser-error, logging, response-body, resource, and method containment remains unchanged.
+77. All v1.6.5.x checkpoint receipt, reconciliation, and persistence semantics remain unchanged.
+78. NVIDIA driver/GPU Operator resources remain read-only in v1.6.6.6.6.6.6.6.6.6.3.3.1.2.3.4.5.6.7.5.6.7.4.
