@@ -1,6 +1,6 @@
 {
   "repository": "NVIDIA/product-security",
-  "baseline_commit": "6e8ef1666730b8906a3690505bb9f4311e68c228",
+  "baseline_commit": "f99a1fd2ba74a3fe59e8a6cac3869f48cfb5d4b6",
   "relevant_terms": [
     "GPU Display Driver",
     "DCGM",
